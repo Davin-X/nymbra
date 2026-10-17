@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   text for the same reason `--screen-test` exists: CI cannot look at a window.
 - The settings window's Reset shows **what will change**, as a diff, rather than
   silently wiping.
-- 684 checks, up from 246: palette, selection, shortcut, PTY and grid suites,
+- 687 checks, up from 246: palette, selection, shortcut, PTY and grid suites,
   plus the existing configuration suite and its sixteen hostile files.
 
 ### Fixed — `ls` appeared to hide filenames
@@ -94,25 +94,44 @@ count there (about 61) had grown past the width the listing needed (about 60).
 
 ### Fixed — CI was red, and had been since M1
 
-Two independent failures, both found by reading the CI logs rather than by
-re-running locally, where everything passed.
+`--pty-test` failed on the runner and passed locally every time, so the answer
+was only ever going to come from CI's own output. It was not the shell, the
+runner, or the test. The diagnosis is now printed by the failing step, which is
+what made it visible at last:
 
+```
+objc[4452]: +[NSPathStore2 initialize] may have been in progress in another
+thread when fork() was called. We cannot safely call it or ignore it in the
+fork() child process. Crashing instead.
+```
+
+- **The `forkpty` child was using Foundation.** `spawnShell` computed a basename
+  with `(path as NSString).lastPathComponent`, which bridges a Swift `String`
+  into the Objective-C runtime. The runtime is shared with the parent, and a
+  child that touches it while another thread is initialising a class is killed
+  by the runtime itself. The child died before `exec`, and because a PTY's line
+  discipline echoes what is typed into it, the terminal still showed the command
+  — so the failure read as "a shell that ignored `TERM`".
+  - The path, the argument vector, the environment and even the bytes of the
+    message printed when `execve` fails are now built in the **parent**; the
+    child calls `execve`, `write` and `_exit` and nothing else. `setenv` is gone
+    from the child as well: it is not async-signal-safe. See the amendment to
+    [ADR-0002](docs/adr/0002-forkpty-before-appkit.md) and invariant 5.
+  - `PTYSuite` now proves a shell is really on the other end: it sends
+    `echo NYMBRA_$((6*7))` and requires `NYMBRA_42` — arithmetic the echo of the
+    command line cannot perform — and asserts the output contains no `objc[`.
+- `resolveShell()`: an **empty** `$SHELL` is treated as unset rather than handed
+  to `execve`. This was a second, independent fault on the same path: a runner
+  whose `SHELL` is set but empty fails the instant the child starts.
 - `Scripts/emulation-checks.sh`: the `CUP` check positioned the cursor at row 5
   and expected that row to be empty except for its `X`. Locally the prompt is two
-  rows and row 5 is blank; on the runner the shell prints a few more lines first,
-  so row 5 already had text. The check now clears the screen before positioning
-  the cursor, so it no longer depends on how long anybody's prompt is.
-- `--pty-test`: the smoke test could pass on an empty capture, and said nothing
-  about what it saw. It now names the resolved shell and the number of bytes read
-  on **stderr**, exits non-zero when the shell produced nothing at all, and the CI
+  rows and row 5 is blank; on the runner the shell prints more lines first, so
+  row 5 already had text. The check now clears the screen before positioning the
+  cursor, so it no longer depends on how long anybody's prompt is.
+- `--pty-test` said nothing about what it saw, and could pass on an empty
+  capture. It now names the resolved shell and the number of bytes read on
+  **stderr**, exits non-zero when the shell produced nothing at all, and the CI
   step prints the capture when a check fails instead of just `exit 1`.
-- `resolveShell()`: an **empty** `$SHELL` is treated as unset rather than handed
-  to `execv`, and a shell that is not executable falls back to `/bin/zsh`,
-  `/bin/bash`, `/bin/sh` in that order. On a runner whose `SHELL` is set but
-  empty, the child used to fail before `exec` and the terminal printed nothing —
-  which looked like a broken emulator and was a broken lookup.
-- If `execv` does fail, the child now writes `nymbra: cannot run <path>: <reason>`
-  to the terminal rather than exiting silently.
 - `ptyRead` retries `EINTR` instead of reporting it as end of output. A signal
   arriving mid-read truncated a session at a random point, which only ever shows
   up under load.

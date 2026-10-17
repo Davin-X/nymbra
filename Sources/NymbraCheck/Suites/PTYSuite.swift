@@ -47,4 +47,40 @@ func ptySuite(_ h: Harness) {
     // than the first one that was listed.
     h.expect(resolveShell("") == resolveShell("/definitely/not/a/shell"),
              "two unusable shells resolve to the same fallback")
+
+    // MARK: The child itself
+
+    // Everything above is answerable without a fork. This one is not: it proves
+    // that the process on the other end of the PTY is a *shell*, and that the
+    // child survived the fork.
+    //
+    // The distinction matters because the PTY echoes what is typed into it. A
+    // child that dies before `exec` still produces a screen full of text, so
+    // "the command appears in the output" proves nothing at all — only the
+    // *result* of running it does.
+    do {
+        let pty = try spawnShell(rows: 24, cols: 80, shell: "/bin/sh")
+        ptyWrite(pty.master, Array("echo NYMBRA_$((6*7))\nexit\n".utf8))
+
+        var output = [UInt8]()
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = ptyRead(pty.master, into: &chunk)
+            if count <= 0 { break }
+            output.append(contentsOf: chunk[0..<count])
+        }
+        waitpid(pty.pid, nil, 0)
+        let text = String(decoding: output, as: UTF8.self)
+
+        // `$((6*7))` has to be *evaluated*, which the echo of the command line
+        // cannot do for it.
+        h.expect(text.contains("NYMBRA_42"),
+                 "the shell on the other end of the PTY ran the command it was sent")
+        h.expect(!text.contains("objc["),
+                 "the forked child did not touch the Objective-C runtime")
+        h.expect(!text.contains("cannot run"),
+                 "the child reached the shell rather than failing to exec one")
+    } catch {
+        h.expect(false, "a shell can be spawned on a PTY (\(error))")
+    }
 }

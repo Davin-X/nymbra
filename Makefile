@@ -1,9 +1,13 @@
-.PHONY: help build test run pty-test screen-test resize-test check clean
+.PHONY: help build test run app launch install dist pty-test screen-test resize-test check clean
 
 help:
 	@echo "make build       - release build"
 	@echo "make test        - run the test harness"
-	@echo "make run         - build and open Nymbra"
+	@echo "make run         - build and open Nymbra from the terminal"
+	@echo "make app         - build Nymbra.app, with its icon"
+	@echo "make launch      - build Nymbra.app and open it from Finder"
+	@echo "make install     - copy Nymbra.app to /Applications (or ~/Applications)"
+	@echo "make dist        - zip Nymbra.app so it can be handed to someone else"
 	@echo "make pty-test    - headless proof that the PTY runs a login shell"
 	@echo "make screen-test - assertions against real shell output, fed through the parser"
 	@echo "make resize-test - proof that the view and the shell agree on the grid"
@@ -18,6 +22,29 @@ test:
 
 run: build
 	.build/release/Nymbra
+
+app:
+	@Scripts/make-app.sh
+
+launch: app
+	open build/Nymbra.app
+
+install: app
+	@if [ -w /Applications ]; then \
+		rm -rf /Applications/Nymbra.app; \
+		cp -R build/Nymbra.app /Applications/; \
+		echo "installed: /Applications/Nymbra.app"; \
+	else \
+		mkdir -p "$(HOME)/Applications"; \
+		rm -rf "$(HOME)/Applications/Nymbra.app"; \
+		cp -R build/Nymbra.app "$(HOME)/Applications/"; \
+		echo "installed: $(HOME)/Applications/Nymbra.app"; \
+	fi
+
+dist: app
+	@rm -f build/Nymbra.zip
+	@cd build && ditto -c -k --keepParent Nymbra.app Nymbra.zip
+	@echo "dist: build/Nymbra.zip"
 
 pty-test: build
 	.build/release/Nymbra --pty-test
