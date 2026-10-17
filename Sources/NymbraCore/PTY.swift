@@ -19,10 +19,17 @@ public enum PTYError: Error, CustomStringConvertible {
     /// fix, and `spawnFailed` on its own does not.
     case spawnFailed(shell: String, reason: String)
 
+    /// The program that gives a shell its terminal is not where it should be.
+    /// Carried as a path because the answer is always "it is not next to the
+    /// binary you are running, and here is the path that was tried".
+    case spawnHelperNotFound(looked: String)
+
     public var description: String {
         switch self {
         case let .spawnFailed(shell, reason):
             return "cannot run \(shell): \(reason)"
+        case let .spawnHelperNotFound(looked):
+            return "cannot find the spawn helper at \(looked) — run `make build`"
         }
     }
 }
@@ -83,12 +90,25 @@ public func defaultWorkingDirectory() -> String {
 public func spawnShell(rows: Int, cols: Int, shell explicitShell: String? = nil,
                        workingDirectory: String? = nil) throws -> PTY {
     let shellPath = resolveShell(explicitShell)
+    // argv[0] is the bare name, as a login shell expects.
+    return try spawn(program: shellPath, arguments: [basename(of: shellPath), "-l"],
+                     rows: rows, cols: cols, workingDirectory: workingDirectory)
+}
+
+/// Run any program on a new PTY, with that terminal as its controlling terminal.
+///
+/// `spawnShell` is this with a login shell in the arguments. The two are the
+/// same call on purpose: "the shell has a terminal" and "a program that does
+/// nothing with its terminal still has one" are different claims, and the second
+/// is the one that catches a spawn that only *looks* right (ADR-0008).
+public func spawn(program: String, arguments: [String], rows: Int, cols: Int,
+                  workingDirectory: String? = nil) throws -> PTY {
+    let helper = try spawnHelperPath()
     let directory = workingDirectory ?? defaultWorkingDirectory()
 
-    // argv[0] is the bare name, as a login shell expects, and the environment is
-    // built here rather than inherited blindly: TERM is what makes full-screen
-    // programs emit the right escape sequences.
-    let argv = CStringVector([basename(of: shellPath), "-l"])
+    // The environment is built here rather than inherited blindly: TERM is what
+    // makes full-screen programs emit the right escape sequences.
+    let argv = CStringVector(arguments)
     let envp = CStringVector(childEnvironment(directory: directory))
     defer {
         argv.deallocate()
@@ -96,12 +116,53 @@ public func spawnShell(rows: Int, cols: Int, shell explicitShell: String? = nil,
     }
 
     var master: Int32 = -1
-    let pid = cpty_spawn(&master, UInt16(rows), UInt16(cols), shellPath,
+    let pid = cpty_spawn(&master, UInt16(rows), UInt16(cols), helper, program,
                          argv.pointer, envp.pointer, directory)
     guard pid > 0 else {
-        throw PTYError.spawnFailed(shell: shellPath, reason: String(cString: strerror(errno)))
+        throw PTYError.spawnFailed(shell: program, reason: String(cString: strerror(errno)))
     }
     return PTY(master: master, pid: pid)
+}
+
+/// The program that claims the terminal for the child: `nymbra-spawn`.
+///
+/// Looked for next to the program that is running rather than in a fixed place,
+/// because the two travel together everywhere they go — `.build/release/` when
+/// the package is built, `Contents/MacOS/` inside the application bundle — and a
+/// terminal that cannot find it cannot start a shell at all. `NYMBRA_SPAWN`
+/// overrides the search for the case where they have been separated on purpose.
+///
+/// See ADR-0008 for why this cannot be done with a spawn attribute.
+public func spawnHelperPath() throws -> String {
+    let name = "NymbraSpawn"
+    if let override = ProcessInfo.processInfo.environment["NYMBRA_SPAWN"],
+       !override.isEmpty {
+        guard access(override, X_OK) == 0 else {
+            throw PTYError.spawnHelperNotFound(looked: override)
+        }
+        return override
+    }
+
+    let directory = runningExecutableDirectory()
+    let path = directory.map { "\($0)/\(name)" } ?? name
+    guard access(path, X_OK) == 0 else {
+        throw PTYError.spawnHelperNotFound(looked: path)
+    }
+    return path
+}
+
+/// Where the running program lives, which is where its helper was built.
+///
+/// `Bundle.main.executableURL` is the reliable answer for both a bare executable
+/// and an application bundle. `argv[0]` is the fallback for the case where there
+/// is no bundle information at all, and is only trusted when it names a path.
+private func runningExecutableDirectory() -> String? {
+    if let executable = Bundle.main.executableURL {
+        return executable.resolvingSymlinksInPath().deletingLastPathComponent().path
+    }
+    let argv0 = CommandLine.arguments.first ?? ""
+    guard argv0.contains("/") else { return nil }
+    return URL(fileURLWithPath: argv0).deletingLastPathComponent().path
 }
 
 /// The last path component, without bridging to `NSString`.

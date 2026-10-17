@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Ctrl+C, Ctrl+Z and job control did nothing
+
+The most useful thing a terminal does after running a command is stop it. In
+everything shipped so far it could not: the shell had **no controlling terminal**,
+so the kernel had no foreground process group to deliver a signal to.
+`tcgetpgrp(master)` answered `0` for the life of every shell.
+
+Nothing on screen said so, which is why it took a test that asks the kernel
+rather than a person watching a prompt. The prompt appeared, keystrokes echoed,
+commands ran, output rendered — all of that is the line discipline, which works
+without a controlling terminal. What was missing was everything that needs a
+*foreground process group*: Ctrl+C, Ctrl+Z, hangup, `^Z`-then-`fg`, and job
+control, which zsh turns off silently when it cannot find its terminal.
+
+- **The cause was an ordering mistake in [ADR-0007](docs/adr/0007-posix-spawn-instead-of-forkpty.md).**
+  That decision opened the slave with a `posix_spawn` *file action*, on the
+  reasoning that the first terminal a session leader opens becomes its
+  controlling terminal. POSIX runs file actions **before** spawn attributes, so
+  the open happened while the child was still in the parent's session — where it
+  cannot claim anything — and `POSIX_SPAWN_SETSID` created the session
+  afterwards. The claim was described as the fix for exactly this symptom, and
+  was the cause of it.
+- **The claim is now a program that owns the terminal.** `openpty()`, then a
+  helper — [ADR-0008](docs/adr/0008-the-helper-owns-the-terminal.md) — which
+  `posix_spawn` execs in place of the shell: `setsid()`, `ioctl(fd, TIOCSCTTY, 0)`
+  on an **inherited** descriptor, `dup2` onto 0/1/2, close every descriptor above
+  stderr, `execv`. After that the process *is* the shell — same pid, same session,
+  same terminal — and Ctrl+C has somewhere to go.
+- The descriptor is inherited rather than reopened by name, and that is not
+  fastidiousness: a master with **no slave open reports end of file immediately**,
+  and a reader that starts before the child has opened the device would take that
+  for the shell having exited. Inheriting it means the child holds the terminal
+  from the moment of the spawn, so the handover cannot be observed. The parent
+  closes its own copy as soon as the spawn returns, because while *anyone* holds
+  the slave open the master never reports end of file at all — a stray copy is a
+  pane that outlives its shell.
+- `posix_spawn` and "no `fork()`" both stand (ADR-0007's actual decision is
+  untouched): the helper is exec'd, never forked, so it begins with a process
+  image that has never held AppKit and invariant 5 is unaffected.
+- `Scripts/make-app.sh` copies `NymbraSpawn` into `Contents/MacOS/`, next to the
+  binary that looks for it, and `Scripts/check-architecture.sh` covers the new
+  target. A missing helper is reported by name and path rather than as a pane
+  that never appears.
+- **The suite had to learn to be a terminal, and that was the second bug.** The
+  buffer between a terminal and its reader is about **1024 bytes**: a program that
+  has filled it blocks in `write`, including a shell halfway through drawing its
+  prompt, which then never reads the command the test is about to send. The tests
+  were stopping between assertions, so they stalled the shells they were asking
+  about — one hung in an unkillable `exit`. `PTYSuite` now drains while it waits,
+  every blocked wait has a deadline, and the eight-shell check asks for a marker
+  its own echoed command cannot supply.
+- **New witnesses, because the old ones could not fail.** `/bin/sh` is bash, and
+  bash reacquires a controlling terminal for itself, so the earlier assertions
+  passed while no shell the application started had one. The suite now asks
+  `/bin/sleep` — a program that never touches its terminal — whether it has one,
+  asks zsh whether a job gets its own process group and whether Ctrl+C hands the
+  terminal back, and asks the shell whether it can see the master of its own
+  terminal by number.
+
 ### Fixed — closing the window was a dead end
 
 Clicking the red button ended the shell and left Nymbra running with no window,

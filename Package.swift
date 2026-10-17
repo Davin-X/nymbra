@@ -8,6 +8,11 @@ let package = Package(
         // forkpty() lives in <util.h>, which Swift cannot import directly.
         .target(name: "CPTY"),
 
+        // The one thing posix_spawn cannot do: hand a child a controlling
+        // terminal (ADR-0008). Exec'd before every shell, so it stays small and
+        // imports nothing.
+        .executableTarget(name: "NymbraSpawn", path: "Sources/NymbraSpawn"),
+
         // Everything that is not UI: PTY, screen model, VT parsing.
         .target(name: "NymbraCore", dependencies: ["CPTY"]),
 

@@ -24,7 +24,8 @@ is a bug — fix it in the same pull request.
 
 | Target | Responsibility | May import |
 |---|---|---|
-| `CPTY` | `openpty()`, `posix_spawn()`, `TIOCSWINSZ`. The only C in the project. | Darwin |
+| `CPTY` | `openpty()`, `posix_spawn()`, `TIOCSWINSZ`. C, and imports nothing of ours. | Darwin |
+| `NymbraSpawn` | `setsid()`, `TIOCSCTTY`, `dup2`, `execv`: the program that claims a shell's terminal and becomes it. An executable, not a library, exec'd in the child's place by `CPTY`. | Darwin |
 | `NymbraCore` | PTY lifecycle, VT parsing, screen model, scrollback, configuration, colour tables, selection. No UI. | Foundation, CPTY |
 | `NymbraInput` | Keyboard mapping: a key press to the bytes a terminal sends, and the application's own commands and shortcuts. No UI. | Foundation |
 | `Nymbra` | Window, settings window, menu bar, input, rendering. | AppKit, CoreText, Metal, NymbraCore, NymbraInput |
@@ -46,6 +47,7 @@ and only the part that needs a screen lives in the app.
 | Font resolution and metrics | `Nymbra/Fonts.swift` | CoreText, and shared by the grid and the preview so they cannot disagree |
 | Grid drawing, selection highlight, clipboard | `Nymbra/TermView.swift` | The renderer |
 | Windows, settings UI, menu bar | `Nymbra/AppController.swift`, `TerminalWindow.swift`, `SettingsWindow.swift`, `AppMenu.swift` | AppKit, and deliberately thin |
+| Claiming a shell's terminal | `NymbraSpawn/main.c`, `NymbraCore/PTY.swift` | It is `ioctl` and `exec`: the one thing `posix_spawn` cannot express, so it is its own program (ADR-0008) |
 
 ### The dependency rule
 
@@ -56,7 +58,11 @@ Nymbra  ──▶  NymbraCore  ──▶  CPTY
 
 Arrows are compile-time dependencies and point one way. Enforced by
 `Scripts/check-architecture.sh`, which fails CI if any UI framework appears in
-`Sources/NymbraCore`, `Sources/NymbraInput` or `Sources/CPTY`.
+`Sources/NymbraCore`, `Sources/NymbraInput`, `Sources/CPTY` or
+`Sources/NymbraSpawn`. `NymbraSpawn` is an arrow that is not in the diagram
+because it is not a compile-time dependency at all: `CPTY` starts it by path at
+runtime, and it execs the shell, so it may safely import anything it likes and
+imports nothing.
 
 The reason is not purity: it is that the emulator is the hard part and must be
 testable in milliseconds, without launching a window or a GPU. `NymbraInput`
@@ -90,6 +96,35 @@ renderer never parses escape sequences; the PTY never formats anything. Settings
 enter the renderer as data rather than as a global, which is what makes the
 settings window's live preview a matter of calling one `apply` method.
 
+### Starting a shell
+
+That flow begins at the shell, and putting a shell on the other end of a terminal
+is not one call. `openpty()` produces a master and a slave; three things then
+have to become true of the process that will own the slave, and only one of them
+can be arranged from the parent:
+
+| What must be true | How it becomes true |
+|---|---|
+| It is a session of its own | `setsid()`, in the child |
+| The slave is its **controlling terminal** | `ioctl(fd, TIOCSCTTY, 0)`, in the child |
+| It is that terminal's **foreground process group** | Follows from the claim |
+
+`posix_spawn` can express none of the middle column: its file actions run *before*
+its attributes, and there is no attribute for an `ioctl`. So the claiming is a
+program, `NymbraSpawn`, which `CPTY` execs with the slave's descriptor inherited
+and an argument list that ends in the shell. It claims the terminal, makes it
+stdin, stdout and stderr, closes every descriptor above stderr, and execs. After
+that the process *is* the shell — same pid, same session, same terminal.
+
+Two details are easy to get wrong and are stated here because both are silent.
+The parent closes its own copy of the slave the moment the spawn returns: while
+*anyone* holds the slave open, the master never reports end of file, so a stray
+copy is a pane that stays on screen for good after its shell has exited. And the
+descriptor is inherited rather than reopened by name, because a master with no
+slave open reports end of file *immediately* — a reader that starts before the
+child has opened the device would take that for the shell having exited
+(ADR-0008).
+
 ## Invariants
 
 These must hold at all times. Add a test when you touch them.
@@ -102,13 +137,17 @@ These must hold at all times. Add a test when you touch them.
    model in a well-defined state. It may not crash, hang, or allocate unboundedly.
 4. **One session, one reader.** Exactly one thread reads a given PTY master.
 5. **The process is never forked.** Shells are started with `openpty()` +
-   `posix_spawn()` (ADR-0007); `fork()` is not called anywhere in Nymbra, and no
-   code of ours runs between the spawn and the `exec`. This is the strongest
-   available form of the rule that ADR-0002 introduced, which was "the child may
-   only make async-signal-safe calls" — a rule the child has now stopped needing,
-   because there is no child code. It is also what allows a shell to be started at
-   any time, with AppKit and its threads already running, which is what tabs,
-   splits and "New Window" all required.
+   `posix_spawn()` (ADR-0007), and the one program of ours that runs before a
+   shell is `NymbraSpawn`, which claims the terminal (ADR-0008) — and it too is
+   `exec`'d by `posix_spawn`, never forked. So no process in Nymbra is a copy of
+   another: `fork()` is not called anywhere, no code of ours runs between a spawn
+   and its `exec`, and the helper begins with a process image that has never held
+   AppKit. This is the strongest available form of the rule that ADR-0002
+   introduced, which was "the child may only make async-signal-safe calls" — a
+   rule the child has now stopped needing, because there is no forked child. It
+   is also what allows a shell to be started at any time, with AppKit and its
+   threads already running, which is what tabs, splits and "New Window" all
+   required.
 6. **The grid is measured, not assumed.** Cell width and height come from
    CoreText metrics for the active font.
 7. **An unreadable colour is a bug, not a preference.** A foreground below 4.5:1
@@ -167,6 +206,7 @@ ADR-0001.
 | Selection and copy | Unit tests on `Selection.text(in:scrollOffset:)` |
 | Commands and shortcuts | Unit tests on `Command`/`Shortcut`, including duplicates |
 | PTY | `--pty-test` smoke test in CI |
+| Controlling terminal and job control | `PTYSuite` asks the kernel, headlessly: `tcgetpgrp` for the shell, a job's own process group, whether Ctrl+C ends it and hands the terminal back, and whether a program that never touches its terminal has one |
 | Emulation, end to end | `--screen-test` feeds real shell output through the parser in CI |
 | Menu bar | `--menu-test` prints the menu and its key equivalents |
 | Rendering | Manual + snapshot once Metal lands |

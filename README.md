@@ -154,7 +154,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
                 └──────┬───────┘
                        │ depends on
                 ┌──────▼───────┐
-                │    CPTY      │  openpty() + posix_spawn() / TIOCSWINSZ — the only C here
+                │    CPTY      │  openpty() + posix_spawn() / TIOCSWINSZ
+                └──────┬───────┘
+                       │ execs, with the terminal inherited
+                ┌──────▼───────┐
+                │ NymbraSpawn  │  setsid() + TIOCSCTTY + execv: claims the shell's terminal
                 └──────────────┘
 ```
 
@@ -162,6 +166,11 @@ The dependency arrow points **one way only**. `NymbraCore` and `CPTY` may not
 import a UI framework, and CI enforces this with
 [`Scripts/check-architecture.sh`](Scripts/check-architecture.sh). This is what
 keeps the emulator testable without a window.
+
+`NymbraSpawn` is the one arrow drawn for a *runtime* dependency: it is not a
+library but a small program that `CPTY` starts and that execs the shell in turn,
+so it depends on nothing and is the reason Ctrl+C works. See
+[ADR-0008](docs/adr/0008-the-helper-owns-the-terminal.md).
 
 Full detail, including the threading model and the invariants that must hold:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
