@@ -78,11 +78,18 @@ enum AppMenu {
                              target: controller, configuration: configuration))
         menu.addItem(command(.newTab, #selector(AppController.newTab(_:)),
                              target: controller, configuration: configuration))
+        menu.addItem(command(.closeTab, #selector(AppController.closeTab(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(.separator())
+        menu.addItem(command(.nextTab, #selector(AppController.nextTab(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(command(.previousTab, #selector(AppController.previousTab(_:)),
+                             target: controller, configuration: configuration))
         menu.addItem(.separator())
         menu.addItem(command(.closePane, #selector(AppController.closePane(_:)),
                              target: controller, configuration: configuration))
         menu.addItem(standard("Close Window", #selector(NSWindow.performClose(_:)),
-                              key: "w", modifiers: [.command, .shift]))
+                              key: "", modifiers: []))
         return root
     }
 

@@ -178,6 +178,19 @@ final class AppController: NSObject {
         activeWindow?.newTab()
     }
 
+    @objc func closeTab(_ sender: Any?) {
+        guard let window = activeWindow else { return }
+        window.closeFocusedTab()
+    }
+
+    @objc func nextTab(_ sender: Any?) {
+        activeWindow?.selectNextTab()
+    }
+
+    @objc func previousTab(_ sender: Any?) {
+        activeWindow?.selectPreviousTab()
+    }
+
     @objc func showSettings(_ sender: Any?) {
         if settingsController == nil {
             settingsController = SettingsWindowController(configuration: configuration) { [weak self] updated in
