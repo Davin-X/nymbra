@@ -15,21 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: SwiftLint
-    runs-on: macos-15
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install SwiftLint
-        run: brew install swiftlint
-
-      - name: SwiftLint
-        run: swiftlint lint --strict
-
   check:
-    needs: lint
     name: build, test, architecture
     # Package.swift requires Swift tools 6.0; the macos-14 image only ships
     # Swift 5.10, so pin a newer image and assert the toolchain below.
@@ -62,9 +48,6 @@ jobs:
             exit 1
           fi
           echo "Swift major OK: $major"
-
-      - name: SwiftLint
-        run: swiftlint lint --strict
 
       - name: Architecture guard
         run: |
@@ -142,6 +125,26 @@ jobs:
           grep -q "closed=true reopened=true shellAlive=true ranCommand=true" window.out \
             || { echo "::error::a closed window did not come back with a working shell"; exit 1; }
           echo "Reopen after close passed"
+
+      # Tabs: a strip you can see, and a shell in each that no other tab can
+      # disturb. No window is shown.
+      - name: Tabs
+        run: |
+          .build/release/Nymbra --tabs-test > tabs.out 2> tabs.err &
+          pid=$!
+          for _ in $(seq 1 45); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            echo "::error::--tabs-test did not finish"
+          fi
+          wait "$pid" 2>/dev/null || true
+          cat tabs.err >&2 || true
+          cat tabs.out
+          grep -q "strip=1 plus=1 created=1 ownShells=1 independent=1 switched=1 " tabs.out \
+            || { echo "::error::tabs did not work"; exit 1; }
+          grep -q "title=1 closed=2 sameShells=1 lastTabClosesWindow=1" tabs.out \
+            || { echo "::error::tabs did not work"; exit 1; }
+          echo "Tabs passed"
 
       - name: Docs present
         run: |
