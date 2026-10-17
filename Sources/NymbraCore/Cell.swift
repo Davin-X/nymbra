@@ -37,6 +37,17 @@ public struct Cell: Equatable {
         return false
     }
 
+    /// The scalar this cell contributes, or a space for a blank. Wide
+    /// continuations contribute nothing, which is what keeps them from being
+    /// measured twice — they are skipped in reflow before this is ever called.
+    public var scalarOrBlank: Unicode.Scalar {
+        switch content {
+        case .empty: return " "
+        case .scalar(let scalar): return scalar
+        case .cluster(let cluster): return cluster.unicodeScalars.first ?? " "
+        }
+    }
+
     /// What this cell contributes to a rendered line. A wide continuation
     /// contributes nothing, because its scalar is already in the previous cell.
     public var text: String {

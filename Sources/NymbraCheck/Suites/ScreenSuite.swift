@@ -510,4 +510,30 @@ func screenSuite(_ h: Harness) {
         t.screen.resize(rows: 2, cols: 3)
         h.equal(t.row(0), "abc", "resize is a no-op when the size is unchanged")
     }
+
+    do {
+        let t = Term(rows: 2, cols: 5)
+        t.feed("abcdefghij")
+        h.equal(t.row(0), "abcde", "text fills to the last column")
+        h.equal(t.row(1), "fghij", "the overflow wraps to the next line")
+        t.screen.resize(rows: 2, cols: 10)
+        h.equal(t.row(0), "abcdefghij", "widening joins the lines the terminal wrapped")
+        h.equal(t.row(1), "", "and leaves the following row blank")
+    }
+
+    do {
+        let t = Term(rows: 2, cols: 10)
+        t.feed("abcdefghij")
+        t.screen.resize(rows: 2, cols: 5)
+        h.equal(t.row(0), "abcde", "narrowing re-wraps at the new width")
+        h.equal(t.row(1), "fghij", "and keeps the overflow")
+    }
+
+    do {
+        let t = Term(rows: 2, cols: 10)
+        t.feed("abc\r\ndef")
+        t.screen.resize(rows: 2, cols: 5)
+        h.equal(t.row(0), "abc", "a hard newline is not joined by reflow")
+        h.equal(t.row(1), "def", "it stays where it was")
+    }
 }
