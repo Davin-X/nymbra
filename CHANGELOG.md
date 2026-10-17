@@ -50,8 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   text for the same reason `--screen-test` exists: CI cannot look at a window.
 - The settings window's Reset shows **what will change**, as a diff, rather than
   silently wiping.
-- 657 checks, up from 246: palette, selection and shortcut suites, plus the
-  existing configuration suite and its sixteen hostile files.
+- 684 checks, up from 246: palette, selection, shortcut, PTY and grid suites,
+  plus the existing configuration suite and its sixteen hostile files.
 
 ### Fixed — `ls` appeared to hide filenames
 
@@ -67,6 +67,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     leaves a legible colour exactly as it was. `SGR 8` (conceal) and `SGR 2`
     (faint) opt out, because hiding and dimming are what those codes are for.
 - Recorded as invariant 7 in `docs/ARCHITECTURE.md`.
+
+### Fixed — `ll` printed every entry on two rows
+
+The symptom was a long listing sliced in half: each entry spread over two rows
+with the year split from the month — and only when the window was **not full
+screen**. The renderer was innocent, and so was the palette fixed above.
+
+`TermView` reported its grid to the shell as `(cols, rows)`; `TerminalWindow`
+read it back as `(rows, cols)`. Every window resize therefore told the shell a
+width equal to the window's **height**. Nothing about that is visible in the app
+itself: we draw a 125-column grid while the shell — `eza` here, but it would be
+`ls -l` or `git log` — formats its output for 39 and hands back lines that wrap
+mid-field. It looked correct in full screen only by accident, because the row
+count there (about 61) had grown past the width the listing needed (about 60).
+
+- Rows and columns now cross the layer boundary as a single value, `GridSize`,
+  in the core: `Terminal(size:)`, `Terminal.resize(_:)` and `TermView.onResize`.
+  The transposition is not merely fixed, it is unrepresentable — recorded as
+  invariant 8 in `docs/ARCHITECTURE.md`.
+- `--resize-test` asserts the property a transposed grid destroys: in a window
+  wider than it is tall there must be more columns than rows. It runs in
+  `make check`, because no window is available to CI.
+- `GridSuite` pins the arithmetic, the degenerate windows (smaller than their own
+  padding, a zero-sized cell) and the model's field order.
+
+### Fixed — CI was red, and had been since M1
+
+Two independent failures, both found by reading the CI logs rather than by
+re-running locally, where everything passed.
+
+- `Scripts/emulation-checks.sh`: the `CUP` check positioned the cursor at row 5
+  and expected that row to be empty except for its `X`. Locally the prompt is two
+  rows and row 5 is blank; on the runner the shell prints a few more lines first,
+  so row 5 already had text. The check now clears the screen before positioning
+  the cursor, so it no longer depends on how long anybody's prompt is.
+- `--pty-test`: the smoke test could pass on an empty capture, and said nothing
+  about what it saw. It now names the resolved shell and the number of bytes read
+  on **stderr**, exits non-zero when the shell produced nothing at all, and the CI
+  step prints the capture when a check fails instead of just `exit 1`.
+- `resolveShell()`: an **empty** `$SHELL` is treated as unset rather than handed
+  to `execv`, and a shell that is not executable falls back to `/bin/zsh`,
+  `/bin/bash`, `/bin/sh` in that order. On a runner whose `SHELL` is set but
+  empty, the child used to fail before `exec` and the terminal printed nothing —
+  which looked like a broken emulator and was a broken lookup.
+- If `execv` does fail, the child now writes `nymbra: cannot run <path>: <reason>`
+  to the terminal rather than exiting silently.
+- `ptyRead` retries `EINTR` instead of reporting it as end of output. A signal
+  arriving mid-read truncated a session at a random point, which only ever shows
+  up under load.
 
 ### Added — input and viewport
 - `NymbraInput`: the keyboard mapping as a UI-free target, so "arrows and

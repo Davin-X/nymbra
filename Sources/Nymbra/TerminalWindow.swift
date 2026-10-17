@@ -41,7 +41,7 @@ final class TerminalWindow: NSObject, NSWindowDelegate {
         window.center()
 
         view.onInput = { [weak self] bytes in self?.terminal.send(bytes) }
-        view.onResize = { [weak self] rows, cols in self?.terminal.resize(rows: rows, cols: cols) }
+        view.onResize = { [weak self] size in self?.terminal.resize(size) }
         terminal.onUpdate = { [weak self] in
             guard let self else { return }
             self.view.needsDisplay = true
@@ -58,7 +58,7 @@ final class TerminalWindow: NSObject, NSWindowDelegate {
 
         // The window's real grid is only known now, so tell the shell about it
         // before the first byte of output is read.
-        terminal.resize(rows: view.rows, cols: view.cols)
+        terminal.resize(view.grid)
         terminal.start()
 
         window.makeFirstResponder(view)
@@ -69,7 +69,7 @@ final class TerminalWindow: NSObject, NSWindowDelegate {
     func apply(_ configuration: Configuration) {
         self.configuration = configuration
         view.apply(configuration)
-        terminal.resize(rows: view.rows, cols: view.cols)
+        terminal.resize(view.grid)
     }
 
     func makeKeyAndOrderFront() {

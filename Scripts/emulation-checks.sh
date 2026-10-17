@@ -77,8 +77,12 @@ check "erase in line stops at the cursor" \
 
 # --- cursor and movement -----------------------------------------------------
 
+# The screen is cleared first so the row under test is empty regardless of how
+# many lines the login shell printed before it. Without the clear this check
+# passes on a machine whose prompt is two rows and fails on one whose shell
+# prints a few extra lines — which is exactly what CI does.
 check "the cursor can be positioned with CUP" \
-      "printf '\033[5;10HX\n'" '^ {9}X$'
+      "printf '\033[2J\033[5;10HX\n'" '^ {9}X$'
 
 check "backspace moves without erasing" \
       "printf 'abc\010\010X\n'" '^aXc$'

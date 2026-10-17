@@ -25,19 +25,21 @@ public final class Terminal {
     private let deliveryQueue: DispatchQueue
     private var started = false
 
-    /// Spawn `shell` — or the user's login shell — sized `rows` × `cols`.
+    /// Spawn `shell` — or the user's login shell — in a `size` grid.
+    ///
+    /// The grid is one value rather than two integers so that the rows and the
+    /// columns cannot be handed over in the wrong order; see `GridSize`.
     ///
     /// Must be constructed before AppKit is initialised: `forkpty` forks, and
     /// forking a process with live threads and Mach ports is undefined behaviour.
     /// See ADR-0002.
     public init(
-        rows: Int,
-        cols: Int,
+        size: GridSize,
         shell: String? = nil,
         deliveryQueue: DispatchQueue = .main
     ) throws {
-        let pty = try spawnShell(rows: rows, cols: cols, shell: shell)
-        let screen = Screen(rows: rows, cols: cols)
+        let pty = try spawnShell(rows: size.rows, cols: size.cols, shell: shell)
+        let screen = Screen(rows: size.rows, cols: size.cols)
         self.master = pty.master
         self.pid = pty.pid
         self.screen = screen
@@ -104,10 +106,14 @@ public final class Terminal {
 
     /// Resize both the model and the PTY, so the shell sees `SIGWINCH` and knows
     /// the new dimensions. Call on the delivery queue.
-    public func resize(rows: Int, cols: Int) {
-        guard rows != screen.rows || cols != screen.cols else { return }
-        screen.resize(rows: rows, cols: cols)
-        ptyResize(master, rows: rows, cols: cols)
+    ///
+    /// Takes one `GridSize`, not a pair of integers: this is the seam where a
+    /// transposed pair silently misinforms every program that formats to the
+    /// terminal's width.
+    public func resize(_ size: GridSize) {
+        guard size.rows != screen.rows || size.cols != screen.cols else { return }
+        screen.resize(rows: size.rows, cols: size.cols)
+        ptyResize(master, rows: size.rows, cols: size.cols)
     }
 
     /// Hang up on the shell.

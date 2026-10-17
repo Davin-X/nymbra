@@ -108,8 +108,9 @@ The milestone that makes this a terminal rather than a demo.
   Headless CI covers clear, SGR, the alternate screen, wrapping and wide
   characters.
 
-**Evidence:** 657 checks pass; `Scripts/emulation-checks.sh` drives real shell
-output through the parser, and CI asserts the result without a window.
+**Evidence:** 684 checks pass; `--resize-test` proves the shell and the view
+agree on the grid; `Scripts/emulation-checks.sh` drives real shell output through
+the parser, and CI asserts the result without a window.
 
 **Non-goals:** ligatures, image protocols, Kitty keyboard protocol.
 

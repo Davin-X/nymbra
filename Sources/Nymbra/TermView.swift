@@ -13,7 +13,7 @@ import NymbraInput
 /// function of the model, which is what makes that swap cheap.
 final class TermView: NSView {
     var onInput: (([UInt8]) -> Void)?
-    var onResize: ((Int, Int) -> Void)?
+    var onResize: ((GridSize) -> Void)?
 
     private let screen: Screen
 
@@ -34,6 +34,10 @@ final class TermView: NSView {
 
     private(set) var cols: Int
     private(set) var rows: Int
+
+    /// The grid this view currently shows, as one value. The same value the
+    /// shell is told about, so the two can only ever agree.
+    var grid: GridSize { GridSize(rows: rows, cols: cols) }
 
     /// Lines the viewport is scrolled up into scrollback. Zero is the live
     /// screen.
@@ -66,8 +70,16 @@ final class TermView: NSView {
         self.cellHeight = metrics.cellHeight
         self.cellWidth = metrics.cellWidth
 
-        self.cols = max(1, Int((frame.width - paddingX * 2) / metrics.cellWidth))
-        self.rows = max(1, Int((frame.height - paddingY * 2) / metrics.cellHeight))
+        let size = GridSize(
+            fittingWidth: frame.width,
+            height: frame.height,
+            paddingX: paddingX,
+            paddingY: paddingY,
+            cellWidth: metrics.cellWidth,
+            cellHeight: metrics.cellHeight
+        )
+        self.cols = size.cols
+        self.rows = size.rows
 
         super.init(frame: frame)
         screen.scrollbackLimit = configuration.behaviour.scrollbackLines
@@ -109,15 +121,21 @@ final class TermView: NSView {
     }
 
     private func updateGridSize() {
-        let newCols = max(1, Int((bounds.width - paddingX * 2) / cellWidth))
-        let newRows = max(1, Int((bounds.height - paddingY * 2) / cellHeight))
-        guard newCols != cols || newRows != rows else { return }
-        cols = newCols
-        rows = newRows
+        let size = GridSize(
+            fittingWidth: bounds.width,
+            height: bounds.height,
+            paddingX: paddingX,
+            paddingY: paddingY,
+            cellWidth: cellWidth,
+            cellHeight: cellHeight
+        )
+        guard size != grid else { return }
+        cols = size.cols
+        rows = size.rows
         // A resize invalidates the viewport: the grid moved under it.
         scrollOffset = 0
         scrollRemainder = 0
-        onResize?(newCols, newRows)
+        onResize?(size)
         needsDisplay = true
     }
 

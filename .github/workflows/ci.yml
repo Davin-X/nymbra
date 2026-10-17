@@ -48,9 +48,33 @@ jobs:
 
       - name: PTY smoke test
         run: |
-          .build/release/Nymbra --pty-test > pty.out || true
-          grep -q "PTY_OK" pty.out
-          grep -q "TERM=xterm-256color" pty.out
+          # `--pty-test` runs a real login shell on a real PTY and prints every
+          # byte it produced. stderr is captured too: it names the resolved shell
+          # and the number of bytes read, which is what turns "no output" into a
+          # diagnosis rather than a guess.
+          echo "SHELL=${SHELL:-<unset>}"
+          .build/release/Nymbra --pty-test > pty.out 2> pty.err &
+          pid=$!
+          for _ in $(seq 1 60); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            echo "::error::--pty-test did not finish within 30 seconds"
+          fi
+          wait "$pid" 2>/dev/null || true
+          cat pty.err >&2 || true
+
+          check() {
+            if grep -q "$1" pty.out; then
+              echo "  ok    $2"
+            else
+              echo "::error::$2"
+              echo "--- pty.out ($(wc -c < pty.out | tr -d ' ') bytes) ---"
+              cat -v pty.out
+              exit 1
+            fi
+          }
+          check "PTY_OK" "the shell ran the command we typed"
+          check "TERM=xterm-256color" "the shell inherited TERM from the terminal"
           echo "PTY smoke test passed"
 
       # Correctness of the emulator, asserted without a window. The script
@@ -59,6 +83,14 @@ jobs:
         run: |
           chmod +x Scripts/emulation-checks.sh
           ./Scripts/emulation-checks.sh
+
+      # The grid the shell is told about is invisible to a test runner, and
+      # transposing its two dimensions is silent: the shell then formats its
+      # output for a width equal to the window's height and every wide line wraps
+      # mid-field, which looks like a renderer fault. No window is created here,
+      # only a view, and it is never drawn.
+      - name: Grid agreement
+        run: .build/release/Nymbra --resize-test
 
       - name: Docs present
         run: |

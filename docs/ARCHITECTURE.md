@@ -109,6 +109,11 @@ These must hold at all times. Add a test when you touch them.
    against the background it is drawn on is lifted until it clears the bar
    (`Palette.readable`). `SGR 8` and `SGR 2` are the exceptions — conceal and
    faint exist to remove contrast.
+8. **A grid crosses a layer boundary as one value.** The number of rows and the
+   number of columns travel together as `GridSize`, never as two bare integers.
+   Transposing them is silent: the shell formats its output to a width equal to
+   the window's height, and every wide line wraps mid-field (invariant 6 is the
+   same instinct for metrics — measure, then keep the measurement intact).
 
 ## Threading
 

@@ -8,11 +8,13 @@ let harness = Harness()
 
 keyboardSuite(harness)
 screenSuite(harness)
+gridSuite(harness)
 viewportSuite(harness)
 parserSuite(harness)
 configurationSuite(harness)
 paletteSuite(harness)
 selectionSuite(harness)
 shortcutSuite(harness)
+ptySuite(harness)
 
 exit(harness.report())

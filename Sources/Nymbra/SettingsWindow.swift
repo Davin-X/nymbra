@@ -592,7 +592,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     // merely invisible.
 
     /// The tab labels, in order.
-    var tabTitles: [String] { tabs.tabViewItems.map { $0.label ?? "" } }
+    var tabTitles: [String] { tabs.tabViewItems.map { $0.label } }
 
     /// Every command and the shortcut the window is showing for it.
     var shortcutBindings: [(command: String, shortcut: String)] {

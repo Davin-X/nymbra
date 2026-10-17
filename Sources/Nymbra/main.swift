@@ -8,9 +8,17 @@ import NymbraCore
 // emulator with real bytes and printing what the screen model made of them.
 
 /// Spawn a login shell, run one command, and print every raw byte it produced.
+///
+/// The shell and the number of bytes read are named on stderr on purpose: "the
+/// PTY test failed" says nothing about whether the shell never started, started
+/// and printed only a banner, or died on the way up. The byte count is the
+/// difference between a race and a bug in the shell lookup.
 func runPTYTest(shell: String?) {
     do {
-        let terminal = try Terminal(rows: 24, cols: 80, shell: shell)
+        let resolved = resolveShell(shell)
+        FileHandle.standardError.write(Data("nymbra: pty-test shell \(resolved)\n".utf8))
+
+        let terminal = try Terminal(size: GridSize(rows: 24, cols: 80), shell: resolved)
         terminal.send("echo PTY_OK; echo TERM=$TERM; tty; id -un; uname -m; exit\n")
 
         var output = [UInt8]()
@@ -21,7 +29,16 @@ func runPTYTest(shell: String?) {
             output.append(contentsOf: chunk[0..<count])
         }
         waitpid(terminal.pid, nil, 0)
+        FileHandle.standardError.write(Data("nymbra: pty-test read \(output.count) bytes\n".utf8))
         FileHandle.standardOutput.write(Data(output))
+
+        // Exiting 0 after printing nothing would make the smoke test pass on an
+        // empty file, which is the one outcome it must never do.
+        if output.isEmpty {
+            FileHandle.standardError.write(
+                Data("nymbra: the shell produced no output at all\n".utf8))
+            exit(2)
+        }
     } catch {
         FileHandle.standardError.write(Data("\(error)\n".utf8))
         exit(1)
@@ -37,7 +54,7 @@ func runPTYTest(shell: String?) {
 /// is what you want when diagnosing, but which would defeat text assertions.
 func runScreenTest(_ command: String, debug: Bool, shell: String?) {
     do {
-        let terminal = try Terminal(rows: 24, cols: 80, shell: shell)
+        let terminal = try Terminal(size: GridSize(rows: 24, cols: 80), shell: shell)
         terminal.send(command + "\nexit\n")
 
         var chunk = [UInt8](repeating: 0, count: 4096)
@@ -106,6 +123,58 @@ func runSettingsTest(configuration: Configuration) {
     }
 }
 
+/// Prove that the view and the shell agree about the grid — and, in particular,
+/// that they agree about *which* dimension is which.
+///
+/// A transposed pair is invisible in review and, once running, does not look
+/// like a size at all: the shell formats its output to a width equal to the
+/// window's height, and every wide line wraps in the middle of a field. That is
+/// exactly how `eza --icons -l` came to split its rows in half.
+///
+/// So the assertion is the relationship a transposed grid breaks (a window wider
+/// than it is tall must report more columns than rows), plus the viewer taking
+/// the numbers it was handed. Only a window can answer this, hence a flag.
+func runResizeTest(configuration: Configuration) {
+    let screen = Screen(rows: 24, cols: 80)
+    let view = TermView(
+        frame: NSRect(x: 0, y: 0, width: 1000, height: 640),
+        screen: screen,
+        configuration: configuration
+    )
+
+    var reported: GridSize?
+    view.onResize = { reported = $0 }
+
+    var failures = 0
+    let windows: [(Double, Double)] = [(880, 560), (700, 500), (420, 260)]
+    for (width, height) in windows {
+        reported = nil
+        view.setFrameSize(NSSize(width: width, height: height))
+
+        guard let size = reported else {
+            print("resize-test: \(Int(width))x\(Int(height)) FAIL reported no resize")
+            failures += 1
+            continue
+        }
+
+        // What the view says it shows, and what the model ends up with when
+        // handed that value, have to be the same grid.
+        screen.resize(rows: size.rows, cols: size.cols)
+        let agrees = size == view.grid
+        let ordered = size.cols > size.rows
+        let modelled = screen.rows == size.rows && screen.cols == size.cols
+        let ok = agrees && ordered && modelled
+        print("resize-test: window \(Int(width))x\(Int(height)) -> "
+              + "\(size.rows) rows x \(size.cols) cols " + (ok ? "ok" : "FAIL"))
+        if !ok { failures += 1 }
+    }
+
+    if failures > 0 {
+        FileHandle.standardError.write(Data("nymbra: \(failures) resize failure(s)\n".utf8))
+        exit(1)
+    }
+}
+
 private func pad(_ text: String, _ width: Int, right: Bool = false) -> String {
     let filler = String(repeating: " ", count: max(0, width - text.count))
     return right ? filler + text : text + filler
@@ -159,6 +228,13 @@ if CommandLine.arguments.contains("--settings-test") {
     exit(0)
 }
 
+// The grid the shell is told about is invisible on a test runner and easy to
+// transpose, so it is asked for directly.
+if CommandLine.arguments.contains("--resize-test") {
+    runResizeTest(configuration: settings)
+    exit(0)
+}
+
 // MARK: - Application
 
 // The shell is spawned *first*, before AppKit is initialised. `forkpty` forks,
@@ -167,7 +243,7 @@ if CommandLine.arguments.contains("--settings-test") {
 // corrected with TIOCSWINSZ once the window exists.
 let terminal: Terminal
 do {
-    terminal = try Terminal(rows: 24, cols: 80, shell: settings.shell.path)
+    terminal = try Terminal(size: GridSize(rows: 24, cols: 80), shell: settings.shell.path)
 } catch {
     FileHandle.standardError.write(Data("\(error)\n".utf8))
     exit(1)
