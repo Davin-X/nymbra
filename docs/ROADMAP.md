@@ -57,7 +57,7 @@ visible rather than discovered later.
 | Copy/paste | ✅ selection (click, word, line, drag), Cmd+C and Cmd+V with bracketed paste | — |
 | Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen | — |
 | Search in scrollback | ❌ | M3 |
-| Tabs and split panes | ❌ | M1.x (P0) |
+| Tabs and split panes | ✅ | M1.x (P0) |
 | Settings: theme, font, colours, cursor, keybindings | ✅ one JSON file, a settings window with live preview, and a readable palette | M2 |
 | Shell integration: prompt/command boundaries, notifications | ⚠️ bell sounds; `OSC 133` not parsed | M4 |
 | Session recovery/persistence | ❌ | M5 |

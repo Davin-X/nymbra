@@ -25,7 +25,7 @@ $ otool -L .build/release/Nymbra
 > preview, eight palettes, and select-and-copy. So are windows: **⌘N** opens
 > another with its own shell, and closing one is not a dead end.
 >
-> It is not yet a daily driver. Missing: tabs and splits, search, mouse reporting
+> It is not yet a daily driver. Missing: search, mouse reporting
 > (the modes are tracked, but no bytes are sent yet), text reflow on resize, and
 > the Metal renderer that will replace CoreText drawing.
 >
@@ -124,6 +124,7 @@ of its own settings file.
 | `make screen-test` | Feed real output through the parser and dump the screen |
 | `make resize-test` | Proof that the view and the shell agree on the grid |
 | `make window-test` | Close a window and get a working shell back |
+| `make tabs-test` | A tab strip, tabs made, switched and closed independently |
 | `make check` | Everything CI runs |
 | `make clean` | Remove build output |
 
@@ -182,7 +183,7 @@ Full detail, including the threading model and the invariants that must hold:
 | M0 | PTY, window, CoreText grid, tests, CI | ✅ complete |
 | M1 | VT emulation, keyboard, scrollback viewport | ✅ core complete |
 | M2 | Settings, configuration, palettes, select and copy | ✅ complete |
-| M1.x | Tabs and splits | ⏳ next |
+| M1.x | Tabs and splits | ✅ done |
 | M3 | Metal renderer, search, reflow, mouse | planned |
 | M4 | Shell integration (OSC 133) and notifications | planned |
 | M5 | Sessions: a PTY host that outlives the window | planned |

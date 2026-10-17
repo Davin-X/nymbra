@@ -473,8 +473,172 @@ if CommandLine.arguments.contains("--split-test") {
     exit(runSplitTest(configuration: settings) ? 0 : 1)
 }
 
-// MARK: - Application
+// Tabs, asserted the way they are used: a strip that is there, tabs that can be
+// made and closed, and a shell in each that no other tab can disturb.
+if CommandLine.arguments.contains("--tabs-test") {
+    exit(runTabsTest(configuration: settings) ? 0 : 1)
+}
 
+/// Tabs, the way they are actually used: a strip that is there to be seen and
+/// clicked, a `+` that makes a tab, and a shell in each that no other tab can
+/// disturb.
+///
+/// Nothing here is visible from outside the process, which is the point. A tab
+/// strip that draws nothing is indistinguishable from no tabs at all until ⌘T is
+/// pressed; a "new tab" that merely swaps the view reads as the window reloading;
+/// and a title that belongs to whichever tab printed last is wrong in a way that
+/// no screenshot of the front tab will ever show. Three shells really run.
+func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:this function_body_length
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+
+    // The dialogue that guards a running command is switched off: a modal question
+    // in a headless process is a hang, not a failure.
+    var quiet = configuration
+    quiet.behaviour.confirmBeforeClosingRunningSession = false
+
+    let window: TerminalWindow
+    do {
+        window = try TerminalWindow(configuration: quiet)
+    } catch {
+        print("tabs-test\tFAIL: no window: \(error)")
+        return false
+    }
+    window.onSpawnFailure = { error in print("tabs-test\tspawn failed: \(error)") }
+
+    // The screen is only ever touched on the main queue, so the run loop has to
+    // turn for anything a shell produces to arrive.
+    func pump(_ seconds: Double) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+    }
+
+    // 1. A strip that is there. The tabs live above the content, so the content
+    //    area is smaller than the view holding it, and the tab in front is placed
+    //    inside that area. That geometry is what makes a tab visible and clickable,
+    //    and it is what `noTabsNoBorder` throws away.
+    let strip = window.tabView
+    let stripVisible = strip.tabPosition == .top
+        && strip.bounds.height > strip.contentRect.height
+        && window.container.frame == strip.contentRect
+
+    // 2. The `+`: an item in the strip that is not a tab. It is counted as an item
+    //    and not as a tab, and it is last, so the tabs read in the order they were
+    //    opened and the thing that makes another one is at the end of them.
+    let plusIsLast = strip.tabViewItems.last === window.plusItem
+    let plusIsNotTab = window.tabCount == strip.tabViewItems.count - 1
+
+    // 3. Making tabs. Each one is a fresh full-window shell, and the selection
+    //    follows the one that was just made rather than staying where it was.
+    let madeFirst = window.newTab()
+    let madeSecond = window.newTab()
+    let ids = strip.tabViewItems.compactMap { $0.identifier as? TabID }
+    let created = madeFirst && madeSecond && ids.count == 3
+
+    // Each tab has exactly one pane and its own shell, and no two are the same
+    // process — which is the property a window with one shared shell could not
+    // have.
+    let shells = ids.map { window.panes(in: $0).values.first?.terminal }
+    let ownShells = shells.allSatisfy { $0 != nil }
+        && Set(shells.compactMap { $0?.pid }).count == ids.count
+        && ids.allSatisfy { window.panes(in: $0).count == 1 }
+
+    // Each tab is asked for a marker only it can produce, and each may show its
+    // own and nobody else's. Evaluated, so the PTY's echo of the command cannot
+    // satisfy the check — it contains `%s` where the marker has a digit.
+    for (index, id) in ids.enumerated() {
+        window.panes(in: id).values.first!.terminal.send("printf 'NYMBRA_TAB_%s\\n' \(index)_OK\n")
+    }
+    pump(1.0)
+    func ownMarkerOnly() -> Bool {
+        ids.enumerated().allSatisfy { index, id in
+            let dump = window.panes(in: id).values.first!.terminal.screen.dump()
+            guard dump.contains("NYMBRA_TAB_\(index)_OK") else { return false }
+            return !ids.enumerated().contains { other, _ in
+                other != index && dump.contains("NYMBRA_TAB_\(other)_OK")
+            }
+        }
+    }
+    let independent = ownMarkerOnly()
+
+    // 4. Switching. The tab in front changes, and what is on screen changes with
+    //    it: a switch that moved the focus and left the old view up is a switch
+    //    that shows two terminals at once.
+    let showingFirst = window.container
+    window.selectTab(ids[1])
+    let movedForward = window.focusedTab == ids[1] && window.container !== showingFirst
+    window.selectTab(ids[2])
+    window.selectTab(ids[1])
+    let movedBack = window.focusedTab == ids[1] && window.container !== showingFirst
+
+    // 5. The title belongs to the tab in front. Each tab names itself, and the
+    //    window carries the name of whichever one is showing — so a title is a
+    //    claim about what the person is looking at, and it is checked by switching.
+    for (index, id) in ids.enumerated() {
+        window.panes(in: id).values.first!.terminal.send("printf '\\033]0;NYMBRA_TITLE_\(index)\\007'\n")
+    }
+    pump(1.0)
+
+    var titleFollows = true
+    for index in ids.indices {
+        window.selectTab(ids[index])
+        pump(0.4)
+        if window.window.title != "NYMBRA_TITLE_\(index)" { titleFollows = false }
+    }
+
+    // And a tab that is not in front must not move it: the title is the window's,
+    // not whichever shell happened to print last.
+    let front = ids[0]
+    let background = ids[2]
+    window.selectTab(front)
+    pump(0.4)
+    let titleInFront = window.window.title
+    window.panes(in: background).values.first!.terminal.send("printf '\\033]0;NYMBRA_IN_THE_BACK\\007'\n")
+    pump(0.6)
+    let backgroundIsQuiet = window.window.title == titleInFront
+
+    // 6. Closing one tab leaves the others exactly as they were: the same shells,
+    //    still holding their own output. A tab closed must not have disturbed the
+    //    sessions beside it.
+    let survivors = ids.filter { $0 != ids[1] }
+    let survivorPids = survivors.map { window.panes(in: $0).values.first!.terminal.pid }
+    let outputBefore = window.panes(in: front).values.first!.terminal.screen.dump()
+
+    window.selectTab(ids[1])
+    window.closeFocusedTab()
+
+    let remaining = Set(strip.tabViewItems.compactMap { $0.identifier as? TabID })
+    let closedCleanly = remaining.count == 2 && remaining == Set(survivors)
+    let sameShells = survivors.map { window.panes(in: $0).values.first!.terminal.pid } == survivorPids
+    let stillAlive = survivorPids.allSatisfy { kill($0, 0) == 0 }
+    let outputHeld = window.panes(in: front).values.first!.terminal.screen.dump() == outputBefore
+
+    // The last tab closes the window, which is what a person expects of a strip
+    // with one thing left in it.
+    window.closeFocusedTab()
+    window.closeFocusedTab()
+    let windowClosed = window.isClosed
+
+    print("tabs-test\tstrip=\(stripVisible ? 1 : 0) plus=\(plusIsLast && plusIsNotTab ? 1 : 0) "
+        + "created=\(created ? 1 : 0) ownShells=\(ownShells ? 1 : 0) "
+        + "independent=\(independent ? 1 : 0) switched=\(movedForward && movedBack ? 1 : 0) "
+        + "title=\(titleFollows && backgroundIsQuiet ? 1 : 0) closed=\(remaining.count) "
+        + "sameShells=\(sameShells && stillAlive && outputHeld ? 1 : 0) "
+        + "lastTabClosesWindow=\(windowClosed ? 1 : 0)")
+
+    // Left to the process exiting, but terminated explicitly so a failure does not
+    // leave shells behind on a test runner.
+    for tab in ids {
+        for pane in window.panes(in: tab).values { pane.terminal.terminate() }
+    }
+    return stripVisible && plusIsLast && plusIsNotTab && created && ownShells && independent
+        && movedForward && movedBack && titleFollows && backgroundIsQuiet
+        && closedCleanly && sameShells && stillAlive && outputHeld && windowClosed
+}
+
+// Temporary: open a window with three named tabs and hold it open so a
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 

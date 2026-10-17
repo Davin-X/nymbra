@@ -12,6 +12,25 @@ final class TerminalTab {
     var onSpawnFailure: ((Error) -> Void)?
     var focusedView: TermView? { panes[focusedPane]?.view }
 
+    /// The strip's item for this tab, so it can name itself.
+    ///
+    /// Set in `attach`, once. A tab that never got attached (a spawn that failed
+    /// before the view existed) has none, and then it is simply silent.
+    weak var item: NSTabViewItem?
+
+    /// A name the person gave this tab, which is what the strip and the window
+    /// then call it. `nil` means "whatever the shell says it is".
+    var customTitle: String? {
+        didSet { item?.label = displayName }
+    }
+
+    /// The name this tab is known by, in the strip and anywhere else.
+    var displayName: String {
+        if let customTitle, !customTitle.isEmpty { return customTitle }
+        let title = panes[focusedPane]?.title ?? ""
+        return title.isEmpty ? "Nymbra" : title
+    }
+
     init(configuration: Configuration) throws {
         self.configuration = configuration
         let first = TerminalTab.firstPane
@@ -89,7 +108,7 @@ final class TerminalTab {
             candidate.view.isFocused = (id == pane)
         }
         container.needsDisplay = true
-        window?.makeFirstResponder(target.view)
+        host?.window.makeFirstResponder(target.view)
         updateTitle()
     }
 
@@ -122,7 +141,7 @@ final class TerminalTab {
         let next = layout.next(after: pane) ?? layout.previous(before: pane)
         guard layout.close(pane) else { return false }
         panes.removeValue(forKey: pane)
-        if closing.view === window?.firstResponder { window?.makeFirstResponder(nil) }
+        if closing.view === host?.window.firstResponder { host?.window.makeFirstResponder(nil) }
         closing.terminal.terminate()
         applyLayout()
         if let next, panes[next] != nil { focus(next) }
@@ -131,7 +150,7 @@ final class TerminalTab {
 
     private func paneExited(_ pane: PaneID) {
         guard layout.count > 1 else {
-            window?.title = "Nymbra \u{2014} shell exited"
+            host?.refreshTitle()
             return
         }
         let next = layout.next(after: pane) ?? layout.previous(before: pane)
@@ -153,41 +172,65 @@ final class TerminalTab {
         for pane in panes.values { pane.view.apply(configuration) }
     }
 
+    /// Ask the window for its title.
+    ///
+    /// Called on every screen update, by any tab, whether or not it is the one
+    /// showing. Whose title the window carries is the window's business, not
+    /// this tab's: a background tab printing a new one must not move the window's
+    /// out from under the person reading the tab they chose.
     private func updateTitle() {
-        let title = panes[focusedPane]?.title ?? ""
-        window?.title = title.isEmpty ? "Nymbra" : title
-        window?.subtitle = layout.count > 1 ? "\(layout.count) panes" : ""
+        host?.refreshTitle()
+        item?.label = displayName
+    }
+
+    /// The commands still in the foreground here, which is what closing ends.
+    ///
+    /// The shell is the session leader and its own process group, and a child job
+    /// takes the foreground group, so this is only ever non-empty where job
+    /// control works. A shell without it answers empty, which is the honest
+    /// answer rather than a bug — and it is why the confirmation is a courtesy
+    /// rather than a guarantee.
+    var runningJobs: [PaneID] {
+        panes.values
+            .filter { $0.terminal.isRunning && $0.terminal.hasForegroundJob }
+            .map(\.id)
+    }
+
+    /// What to say about them. One command and three are different sentences.
+    var closeDetail: String {
+        switch runningJobs.count {
+        case 0: return ""
+        case 1: return "A command is still running here. Closing ends it."
+        default: return "\(runningJobs.count) commands are still running here. Closing ends them."
+        }
+    }
+
+    /// Ask before ending what is still running here.
+    ///
+    /// `false` means the person said no, and nothing is closed — not the tab, not
+    /// the pane. When the setting is off, or nothing is running, the answer is yes
+    /// without a word, because a question nobody can answer is a hang.
+    func confirmClose(what: String) -> Bool {
+        guard configuration.behaviour.confirmBeforeClosingRunningSession,
+              !runningJobs.isEmpty else { return true }
+        return confirm(what: what, detail: closeDetail)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard configuration.behaviour.confirmBeforeClosingRunningSession,
-              panes.values.contains(where: { $0.terminal.isRunning && $0.terminal.hasForegroundJob })
-        else { return true }
-        return confirm(what: "Close this tab?",
-                       detail: "A command is still running here. Closing the tab ends it.")
+        confirmClose(what: "Close this tab?")
     }
 
     private func confirmClosing(pane: PaneID) -> Bool {
         guard configuration.behaviour.confirmBeforeClosingRunningSession,
-              let candidate = panes[pane],
-              candidate.terminal.isRunning,
-              candidate.terminal.hasForegroundJob
-        else { return true }
+              runningJobs.contains(pane) else { return true }
         return confirm(what: "Close this pane?",
                        detail: "A command is still running here. Closing the pane ends it.")
     }
 
-    private func confirm(what: String, detail: String) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = what
-        alert.informativeText = detail
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Close")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
-    }
-
-    weak var window: NSWindow?
+    /// The window this tab is in: who it asks for a title, and who asks it for one.
+    /// A tab has no title of its own — the window's title is the window's business,
+    /// and this is the reference that lets it be.
+    weak var host: TerminalWindow?
 }
 
 /// One tab's identity inside a window.
