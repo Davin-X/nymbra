@@ -9,6 +9,7 @@ import Foundation
 /// advertising a shortcut that does nothing.
 public enum Command: String, CaseIterable, Sendable {
     case newWindow
+    case newTab
     case splitRight
     case splitDown
     case closePane
@@ -26,6 +27,7 @@ public enum Command: String, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .newWindow: return "New Window"
+        case .newTab: return "New Tab"
         case .splitRight: return "Split Right"
         case .splitDown: return "Split Down"
         case .closePane: return "Close Pane"
@@ -45,6 +47,7 @@ public enum Command: String, CaseIterable, Sendable {
     public var explanation: String {
         switch self {
         case .newWindow: return "Open another window, with a shell of its own"
+        case .newTab: return "A new shell in this window, filling it"
         case .splitRight: return "Put a new shell beside this one"
         case .splitDown: return "Put a new shell below this one"
         case .closePane: return "Close the pane with the keyboard; the window, if it is the last one"
@@ -67,6 +70,7 @@ public enum Command: String, CaseIterable, Sendable {
     public var defaultShortcut: Shortcut? {
         switch self {
         case .newWindow: return Shortcut(parsing: "cmd+n")
+        case .newTab: return Shortcut(parsing: "cmd+shift+t")
         case .splitRight: return Shortcut(parsing: "cmd+d")
         case .splitDown: return Shortcut(parsing: "cmd+shift+d")
         case .closePane: return Shortcut(parsing: "cmd+w")

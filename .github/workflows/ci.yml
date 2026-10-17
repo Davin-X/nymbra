@@ -5,13 +5,31 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Nightly fuzz + emulation run: catches regressions that land between
+    # commits without waiting for a push or pull request.
+    - cron: "0 2 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: SwiftLint
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: SwiftLint
+        run: swiftlint lint --strict
+
   check:
+    needs: lint
     name: build, test, architecture
     # Package.swift requires Swift tools 6.0; the macos-14 image only ships
     # Swift 5.10, so pin a newer image and assert the toolchain below.
@@ -21,6 +39,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            .swiftpm
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
 
       - name: Toolchain
         run: |
@@ -34,6 +62,9 @@ jobs:
             exit 1
           fi
           echo "Swift major OK: $major"
+
+      - name: SwiftLint
+        run: swiftlint lint --strict
 
       - name: Architecture guard
         run: |
@@ -115,7 +146,7 @@ jobs:
       - name: Docs present
         run: |
           for f in README.md LICENSE CONTRIBUTING.md CHANGELOG.md \
-                   docs/ARCHITECTURE.md docs/ROADMAP.md; do
+                   docs/ARCHITECTURE.md docs/ROADMAP.md docs/CONFIG.md; do
             test -s "$f" || { echo "missing or empty: $f"; exit 1; }
           done
           echo "docs OK"

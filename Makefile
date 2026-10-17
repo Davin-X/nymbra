@@ -8,6 +8,7 @@ bin = $(shell swift build -c release --show-bin-path 2>/dev/null)
 help:
 	@echo "make build       - release build"
 	@echo "make test        - run the test harness"
+	@echo "make lint        - run SwiftLint (requires swiftlint)"
 	@echo "make run         - build and open Nymbra from the terminal"
 	@echo "make app         - build Nymbra.app, with its icon"
 	@echo "make launch      - build Nymbra.app and open it from Finder"
@@ -22,6 +23,9 @@ help:
 
 build:
 	swift build -c release
+
+lint:
+	swiftlint lint --strict
 
 # `build` first, deliberately: the suite starts real shells, and the program
 # that gives a shell its terminal (NymbraSpawn) is looked for beside the binary
@@ -70,7 +74,7 @@ resize-test: build
 window-test: build
 	"$(bin)/Nymbra" --window-test
 
-check: test pty-test screen-test resize-test window-test
+check: lint test pty-test screen-test resize-test window-test
 
 clean:
 	swift package clean
