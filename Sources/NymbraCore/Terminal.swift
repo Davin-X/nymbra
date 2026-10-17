@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// A live terminal: a PTY, the parser that consumes its output, and the screen
@@ -66,7 +67,29 @@ public final class Terminal {
                 self.onUpdate?()
             }
         }
-        deliveryQueue.async { [weak self] in self?.onExit?() }
+        deliveryQueue.async { [weak self] in
+            guard let self else { return }
+            self.isRunning = false
+            self.onExit?()
+        }
+    }
+
+    /// True until the shell exits or the PTY reaches end of file.
+    public private(set) var isRunning = true
+
+    /// True when something other than the shell itself holds the terminal's
+    /// foreground — a command still running, which is worth confirming before a
+    /// window is closed.
+    ///
+    /// The shell is the session leader and its own process group, and a child job
+    /// takes the foreground group. Comparing the two is the POSIX way to ask
+    /// whether the shell is busy. A shell without job control never changes the
+    /// foreground group, so this answers `false` there; that is the honest
+    /// answer rather than a bug, and it is why the confirmation is a courtesy
+    /// rather than a guarantee.
+    public var hasForegroundJob: Bool {
+        let foreground = tcgetpgrp(master)
+        return foreground != -1 && foreground != pid
     }
 
     // MARK: - Input

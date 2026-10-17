@@ -11,5 +11,8 @@ screenSuite(harness)
 viewportSuite(harness)
 parserSuite(harness)
 configurationSuite(harness)
+paletteSuite(harness)
+selectionSuite(harness)
+shortcutSuite(harness)
 
 exit(harness.report())

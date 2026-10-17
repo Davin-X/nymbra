@@ -54,6 +54,63 @@ func runScreenTest(_ command: String, debug: Bool, shell: String?) {
     }
 }
 
+/// Print every preset and how legible each of its colours is, so CI can assert
+/// that no preset ships a colour its own background swallows.
+///
+/// The `worst` line is the assertion: it ends in `readable` or in `UNREADABLE`.
+/// This exists because `ls` prints directories in ANSI colour 4, and a dim blue
+/// on a dark background does not look like a colour setting — it looks like the
+/// filenames are missing.
+func runThemeTest() {
+    for preset in Configuration.Colours.Preset.allCases {
+        let palette = Palette(preset: preset)
+        // The interface colours that are *text*: `selection` is a background for
+        // text that carries its own contrast, and the background does not need
+        // to contrast with itself.
+        let named = ["foreground", "cursor"] + Palette.ansiNames
+        var worst = Double.greatestFiniteMagnitude
+
+        print("\(preset) background \(palette.background.hex)")
+        for name in named {
+            guard let colour = palette.colour(named: name) else { continue }
+            let raw = Palette.RGB.contrastRatio(colour, palette.background)
+            let drawn = Palette.readable(colour, on: palette.background)
+            let final = Palette.RGB.contrastRatio(drawn, palette.background)
+            worst = min(worst, final)
+            let note = drawn == colour ? "" : " (lifted to \(drawn.hex))"
+            print("  " + pad(name, 15) + colour.hex
+                  + pad(String(format: "%.2f:1", raw), 10, right: true) + note)
+        }
+        print("  worst \(String(format: "%.2f", worst)):1 "
+              + (worst >= 4.5 ? "readable" : "UNREADABLE"))
+    }
+}
+
+/// The menu bar is not visible to a test runner either, so `--menu-test` prints
+/// what would be installed, key equivalents included.
+func runMenuTest(configuration: Configuration) {
+    let controller = AppController(configuration: configuration)
+    let menus = AppMenu.build(controller: controller, configuration: configuration)
+    for line in AppMenu.describe(menus.main) { print(line) }
+}
+
+/// The settings window is the largest piece of UI in the project and the one a
+/// test runner can least easily look at, so it prints itself too: build it, list
+/// what each control loaded, and exit without showing anything.
+func runSettingsTest(configuration: Configuration) {
+    let controller = SettingsWindowController(configuration: configuration) { _ in }
+    print("tabs\t" + controller.tabTitles.joined(separator: ","))
+    print("appearance\t" + controller.appearanceSummary)
+    for binding in controller.shortcutBindings {
+        print("shortcut\t\(binding.command)\t\(binding.shortcut)")
+    }
+}
+
+private func pad(_ text: String, _ width: Int, right: Bool = false) -> String {
+    let filler = String(repeating: " ", count: max(0, width - text.count))
+    return right ? filler + text : text + filler
+}
+
 // MARK: - Configuration
 //
 // Loaded before anything else, and before the shell is spawned, because the
@@ -81,6 +138,27 @@ for (flag, debug) in [("--screen-test", false), ("--screen-debug", true)] {
     }
 }
 
+// Colour and menu proofs are pure functions of the settings, so they run before
+// a shell is ever spawned — and before AppKit is asked to do anything but exist.
+if CommandLine.arguments.contains("--theme-test") {
+    runThemeTest()
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--menu-test") {
+    // Menus are AppKit objects, so the application has to exist for them to be
+    // built. Nothing is activated and no window opens; this process exits here.
+    _ = NSApplication.shared
+    runMenuTest(configuration: settings)
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--settings-test") {
+    NSApplication.shared.setActivationPolicy(.prohibited)
+    runSettingsTest(configuration: settings)
+    exit(0)
+}
+
 // MARK: - Application
 
 // The shell is spawned *first*, before AppKit is initialised. `forkpty` forks,
@@ -98,34 +176,8 @@ do {
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
-let frame = NSRect(x: 0, y: 0, width: 1000, height: 640)
-let view = TermView(frame: frame, screen: terminal.screen, configuration: settings)
-
-let window = NSWindow(
-    contentRect: frame,
-    styleMask: [.titled, .closable, .miniaturizable, .resizable],
-    backing: .buffered,
-    defer: false
-)
-window.title = "Nymbra"
-window.contentView = view
-window.center()
-window.makeKeyAndOrderFront(nil)
-window.makeFirstResponder(view)
-
-view.onInput = { bytes in terminal.send(bytes) }
-view.onResize = { rows, cols in terminal.resize(rows: rows, cols: cols) }
-
-// The window's real grid size is only known now, so tell the shell about it.
-terminal.resize(rows: view.rows, cols: view.cols)
-
-terminal.onUpdate = { [weak view] in
-    view?.needsDisplay = true
-    if !terminal.screen.title.isEmpty { window.title = terminal.screen.title }
-}
-terminal.onBell = { NSSound.beep() }
-terminal.onExit = { window.title = "Nymbra \u{2014} shell exited" }
-terminal.start()
+let controller = AppController(configuration: settings)
+controller.start(terminal: terminal)
 
 app.activate(ignoringOtherApps: true)
 app.run()

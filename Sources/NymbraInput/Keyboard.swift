@@ -13,7 +13,7 @@
 public enum Keyboard {
 
     /// Modifier keys, mirroring what the platform reports.
-    public struct Modifiers: OptionSet, Sendable {
+    public struct Modifiers: OptionSet, Hashable, Sendable {
         public let rawValue: Int
         public init(rawValue: Int) { self.rawValue = rawValue }
 

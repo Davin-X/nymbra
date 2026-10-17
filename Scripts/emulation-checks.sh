@@ -143,6 +143,47 @@ printf 'this is not JSON at all' > "$config_file"
 check_with_config "a broken config file does not stop the terminal" \
       "$config_file" "printf 'SURVIVED\n'" '^SURVIVED$'
 
+# --- legibility --------------------------------------------------------------
+
+# `ls` prints directories in ANSI colour 4. A blue that vanishes into the
+# background is not read as a colour setting; it is read as missing filenames.
+# `--theme-test` prints each preset, the contrast of every colour it defines,
+# and a verdict per preset. This asserts the verdict rather than the pixels, so
+# tuning a palette never means editing this script.
+
+theme_output=$("$BINARY" --theme-test 2>/dev/null)
+
+# One verdict line per preset, and none of them UNREADABLE: if a colour were
+# still below the bar after the readability rule, `--theme-test` would say so.
+verdicts=$(printf '%s\n' "$theme_output" | grep '^  worst ')
+readable_verdicts=$(printf '%s\n' "$verdicts" | grep -c 'readable' || true)
+if [ "$readable_verdicts" -ge 3 ] && ! printf '%s\n' "$theme_output" | grep -q 'UNREADABLE'; then
+  echo "  ok    every preset is legible ($readable_verdicts presets, no colour unreadable)"
+else
+  echo "  FAIL  every preset is legible ($readable_verdicts of 3, see the table below)" >&2
+  printf '%s\n' "$theme_output" >&2
+  failures=$((failures + 1))
+fi
+
+# The reported bug, exactly: the dark preset's ANSI blue, which is the colour
+# `ls` prints a directory in. It must be legible as defined, not merely rescued
+# at drawing time — otherwise the settings window's swatch is lying.
+dark_blue=$(printf '%s\n' "$theme_output" \
+  | awk '/^dark background/{inDark=1} inDark && /^  blue /{print; exit}')
+case "$dark_blue" in
+  *lifted*)
+    echo "  FAIL  the dark preset's blue is legible as defined ($dark_blue)" >&2
+    failures=$((failures + 1))
+    ;;
+  '')
+    echo "  FAIL  --theme-test reports the dark preset's blue" >&2
+    failures=$((failures + 1))
+    ;;
+  *)
+    echo "  ok    the dark preset's blue is legible as defined ($dark_blue)"
+    ;;
+esac
+
 if [ "$failures" -ne 0 ]; then
   echo "emulation checks: $failures failure(s)" >&2
   exit 1

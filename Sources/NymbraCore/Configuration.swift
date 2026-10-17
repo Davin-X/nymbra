@@ -54,14 +54,9 @@ public struct Configuration: Codable, Equatable, Sendable {
             case dark, light, highContrast
         }
 
-        /// The colours a user may override by name, including the ones that are
-        /// not part of the 16 ANSI colours.
-        public static let names: Set<String> = [
-            "foreground", "background", "cursor", "selection",
-            "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
-            "bright-black", "bright-red", "bright-green", "bright-yellow",
-            "bright-blue", "bright-magenta", "bright-cyan", "bright-white",
-        ]
+        /// The colours a user may override by name. One list, held in `Palette`,
+        /// so the vocabulary cannot drift between validation and drawing.
+        public static let names: Set<String> = Palette.names
 
         public var preset: Preset = .dark
 
@@ -78,15 +73,11 @@ public struct Configuration: Codable, Equatable, Sendable {
             overrides = container.orDefault(.overrides, [:])
         }
 
-        /// `#rrggbb`, or `nil`. Parsed here rather than in the view, so an
-        /// invalid colour is caught when settings load instead of when drawn.
+        /// `#rrggbb`, or `nil`. Parsed by `Palette.RGB`, so there is one parser
+        /// rather than two that can disagree.
         public static func rgb(from text: String) -> (red: UInt8, green: UInt8, blue: UInt8)? {
-            guard text.count == 7, text.hasPrefix("#") else { return nil }
-            let digits = text.dropFirst()
-            guard digits.allSatisfy({ $0.isHexDigit }), let value = UInt32(digits, radix: 16) else {
-                return nil
-            }
-            return (UInt8((value >> 16) & 0xFF), UInt8((value >> 8) & 0xFF), UInt8(value & 0xFF))
+            guard let colour = Palette.RGB(hex: text) else { return nil }
+            return (colour.red, colour.green, colour.blue)
         }
     }
 
@@ -285,6 +276,19 @@ public struct Configuration: Codable, Equatable, Sendable {
         }
 
         return warnings
+    }
+
+    /// The names of the sections that differ from `other`, for the Settings
+    /// window's Reset confirmation. "Restore defaults" should say what it is
+    /// about to discard rather than silently wiping a file the user edited.
+    public func differingSections(from other: Configuration) -> [String] {
+        var sections: [String] = []
+        if appearance != other.appearance { sections.append("Appearance") }
+        if colours != other.colours { sections.append("Colours") }
+        if behaviour != other.behaviour { sections.append("Behaviour") }
+        if keyboard != other.keyboard { sections.append("Keyboard shortcuts") }
+        if shell != other.shell { sections.append("Shell") }
+        return sections
     }
 
     /// True when nothing in the configuration is out of range. Loading always

@@ -54,13 +54,14 @@ visible rather than discovered later.
 
 | Requirement | State | Milestone |
 |---|---|---|
-| Copy/paste | ⚠️ paste works (bracketed); **no selection, so no copy** | M3 |
+| Copy/paste | ✅ selection (click, word, line, drag), Cmd+C and Cmd+V with bracketed paste | — |
 | Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen | — |
-| Search in scrollback | ❌ | M4 |
+| Search in scrollback | ❌ | M3 |
 | Tabs and split panes | ❌ | M1.x (P0) |
-| Settings: theme, font, colours, cursor, keybindings | ❌ `Theme` is a hardcoded struct | M2 |
+| Settings: theme, font, colours, cursor, keybindings | ✅ one JSON file, a settings window with live preview, and a readable palette | M2 |
 | Shell integration: prompt/command boundaries, notifications | ⚠️ bell sounds; `OSC 133` not parsed | M4 |
 | Session recovery/persistence | ❌ | M5 |
+| Colour legibility for program-chosen colours | ✅ `Palette.readable` lifts any foreground below 4.5:1 | — |
 
 `Scripts/emulation-checks.sh` asserts the emulation rows above end to end, on a
 real PTY, with no window — the same script `make check` and CI run.
@@ -107,7 +108,7 @@ The milestone that makes this a terminal rather than a demo.
   Headless CI covers clear, SGR, the alternate screen, wrapping and wide
   characters.
 
-**Evidence:** 246 checks pass; `Scripts/emulation-checks.sh` drives real shell
+**Evidence:** 657 checks pass; `Scripts/emulation-checks.sh` drives real shell
 output through the parser, and CI asserts the result without a window.
 
 **Non-goals:** ligatures, image protocols, Kitty keyboard protocol.
@@ -115,7 +116,8 @@ output through the parser, and CI asserts the result without a window.
 ### M1.x — Tabs and splits 🔜 *still owed from M1*
 
 A terminal with one pane is a toy. Broken out of M1 deliberately, so that the
-emulation core could be finished and verified first.
+emulation core could be finished and verified first — and now the natural next
+step, since M2 has landed.
 
 **Scope**
 - Tabs, with the unread badge M4 will fill in
@@ -126,40 +128,73 @@ emulation core could be finished and verified first.
 **Acceptance:** four panes, each running a different program, resized and closed
 independently, with no shared mutable state between them.
 
-### M2 — Settings and configuration 🔜 *before the renderer, not after*
+### M2 — Settings and configuration ✅
 
 Settings cannot be added late. Live preview means the renderer must be a
 function of configuration rather than of a hardcoded `Theme`, so this milestone
-lands before the renderer is rewritten — otherwise that rewrite is paid for
+landed before the renderer is rewritten — otherwise that rewrite is paid for
 twice.
 
-**Scope**
-- A `Configuration` value type that is `Codable`, has documented defaults, and
-  is validated on load, so a hand-edited mistake cannot make the app unusable
-- Stored as plain JSON in `~/Library/Application Support/Nymbra/`. The format is
-  part of the public surface: hand-editable and stable, and unknown keys from a
-  newer version are ignored rather than fatal
-- A settings window with a **live preview**: changes apply to open terminals as
-  they are made, with no restart
+**Delivered**
+
+- `Configuration`: a `Codable` value type with documented defaults, validated on
+  load. Loading is total — a missing file is the defaults, a malformed one is
+  the defaults plus a warning, a wrong-typed field falls back per field, and an
+  unknown key is ignored. See
+  [ADR-0006](adr/0006-configuration-as-a-validated-json-file.md).
+- Plain JSON at `~/Library/Application Support/Nymbra/config.json`, overridable
+  with `$NYMBRA_CONFIG` so tests and CI never touch a real user's settings.
+- A settings window (`SettingsWindow.swift`) with tabs for Appearance, Colours,
+  Behaviour, Keyboard and Shell, and a **live preview** that draws with the same
+  `Theme` and palette the terminal does. Changes apply to the open terminal as
+  they are made; saving is debounced.
+- `Palette` in the UI-free core: three presets, per-colour overrides, WCAG
+  contrast arithmetic and the xterm 256-colour table. Only the `CGColor`
+  conversion lives in the app (`Theme`).
+- `Selection`: click, double-click, triple-click and drag, with the text
+  extraction in the core, so copy is testable without a window.
+- `Command`/`Shortcut` in `NymbraInput`: one list of application commands read by
+  *both* the menu bar and the settings window, so an advertised shortcut cannot
+  drift from a honoured one. Shortcut parsing is strict and duplicates are
+  refused at the moment they are typed.
+- `--theme-test` and `--menu-test`: the palettes and the menu bar printed as text,
+  for the same reason `--screen-test` exists.
 
 | Setting | Detail |
 |---|---|
-| Appearance | Theme, font family and size, with a live preview |
+| Appearance | Preset, font family and size, with a live preview |
 | Colours | Presets — dark, light, high contrast — plus per-colour overrides |
 | Behaviour | Cursor style and blink, scrollback size, confirm before closing a session that is still running |
 | Keyboard | The default shortcuts, shown in full, and every one of them remappable |
-| Shell | The default shell, defaulting to `$SHELL` rather than a hardcoded path |
+| Shell | The default shell, read from `/etc/shells`, defaulting to `$SHELL` |
 | Reset | Restore the original settings, as a diff rather than a silent wipe |
+
+**Fixed in this milestone: legibility.** The first palette was the traditional
+xterm one, whose blue is RGB(0,0,238) — 2:1 against a dark background. `ls -G`
+and `ls -l` print directories in exactly that blue, so the filenames looked
+*missing* rather than dim. Two changes: every colour in every preset now clears
+4.5:1 (WCAG AA) against its own background, and `Palette.readable(_:on:)` lifts
+any foreground a program chooses for itself until it can be read, which is what
+protects `LS_COLORS`, `git` and true-colour output. `SGR 8` (conceal) and `SGR 2`
+(faint) opt out, because hiding and dimming are what those codes are *for*.
+
+**Owed — tracked here rather than quietly dropped**
+- The **command palette** row in the feature catalogue. Not in this milestone.
+- Accessibility: VoiceOver labels and full keyboard traversal of the settings
+  window are not written yet.
+- The settings window has been verified headlessly and by hand on one machine; it
+  has no snapshot tests.
 
 **Acceptance:** change the font size and theme in the settings window and watch
 an open terminal update immediately; quit, relaunch, and find the settings
 intact; delete the config file and start on defaults; hand-edit it into an
 invalid state and start on defaults *with a warning*, rather than failing to
-launch.
+launch. All four hold; the first is what the live preview is for.
 
-**Testable headlessly?** Yes, which is the point. The settings *model* is UI-free
-and asserted in `NymbraCheck` — defaults round-trip, validation rejects
-nonsense, reset restores, unknown keys are ignored. The window itself is thin.
+**Testable headlessly?** Yes, and that is where the work went. The settings
+model, the colour tables, the selection model and the shortcut table are all
+UI-free and asserted in `NymbraCheck`; the window and the menu bar are thin, and
+both can print themselves (`--menu-test`, `--theme-test`) for CI to read.
 
 See [ADR-0006](adr/0006-configuration-as-a-validated-json-file.md) for why the
 file is JSON, why loading can never fail, and why the model is UI-free.
@@ -171,7 +206,10 @@ file is JSON, why loading can never fail, and why the model is UI-free.
 - One instanced draw call per frame; damage tracking when worthwhile
 - 60 fps scrolling of a full screen at 4K; steady-state idle near 0% CPU
 - Block cursor, selection highlight, undercurl
-- Text selection, and therefore copy
+- Text selection, and therefore copy (the selection *model* and copy landed in
+  M2; this milestone draws and renders them at speed)
+- **Search in scrollback** — carried forward, since it needs the damage-tracked
+  renderer to show matches without redrawing everything
 - **Text reflow on resize** — carried over from M1, which preserves content but
   does not rewrap
 - **Mouse reporting bytes** for the modes already tracked (1000/1002/1003,
@@ -257,20 +295,21 @@ Priority: **P0** required for v0.1 · **P1** v0.1 if cheap · **P2** later.
 |---|---|---|
 | Tabs | P0 | M1.x |
 | Splits (horizontal/vertical) | P0 | M1.x |
-| Settings window with live preview | P1 | M2 |
-| Theme presets: dark, light, high contrast | P1 | M2 |
-| Font family and size, with a preview | P1 | M2 |
-| Cursor style and blink | P1 | M2 |
-| Scrollback size | P1 | M2 |
-| Confirm before closing a running session | P1 | M2 |
-| Default shell selection | P1 | M2 |
-| Remappable keybindings | P1 | M2 |
-| Config file | P1 | M2 |
-| Reset to defaults | P1 | M2 |
-| Command palette | P1 | M2 |
-| Full screen | P2 | M2 |
-| Search in scrollback | P1 | M4 |
-| Text selection and copy | P0 | M3 |
+| Settings window with live preview | P1 | ✅ M2 |
+| Theme presets: dark, light, high contrast | P1 | ✅ M2 |
+| Font family and size, with a preview | P1 | ✅ M2 |
+| Cursor style and blink | P1 | ✅ M2 |
+| Scrollback size | P1 | ✅ M2 |
+| Confirm before closing a running session | P1 | ✅ M2 |
+| Default shell selection | P1 | ✅ M2 |
+| Remappable keybindings | P1 | ✅ M2 |
+| Config file | P1 | ✅ M2 |
+| Reset to defaults | P1 | ✅ M2 |
+| Legible colours for program-chosen output | P0 | ✅ M2 |
+| Command palette | P1 | M3 |
+| Full screen | P2 | ✅ M2 |
+| Search in scrollback | P1 | M3 |
+| Text selection and copy | P0 | ✅ M2 |
 | Multiple windows | P2 | M5 |
 | VoiceOver / accessibility | P1 | M2 |
 
@@ -305,7 +344,7 @@ it is probably out of scope.
 
 ## Release criteria for v0.1
 
-- [ ] M1, M1.x, M2 and M4 complete
+- [ ] M1.x, M3, M4 and M5 complete (M0–M2 are done)
 - [ ] `vim`, `htop`, `tmux`, `lazygit`, `ssh` verified working
 - [ ] Fuzzer clean
 - [ ] `make check` green on a clean clone

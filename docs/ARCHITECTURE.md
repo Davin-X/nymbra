@@ -25,10 +25,27 @@ is a bug — fix it in the same pull request.
 | Target | Responsibility | May import |
 |---|---|---|
 | `CPTY` | `forkpty()`, `TIOCSWINSZ`. The only C in the project. | Darwin |
-| `NymbraCore` | PTY lifecycle, VT parsing, screen model, scrollback. No UI. | Foundation, CPTY |
-| `NymbraInput` | Keyboard mapping: a key press to the bytes a terminal sends. No UI. | Foundation |
-| `Nymbra` | Window, input, rendering. | AppKit, CoreText, Metal, NymbraCore, NymbraInput |
+| `NymbraCore` | PTY lifecycle, VT parsing, screen model, scrollback, configuration, colour tables, selection. No UI. | Foundation, CPTY |
+| `NymbraInput` | Keyboard mapping: a key press to the bytes a terminal sends, and the application's own commands and shortcuts. No UI. | Foundation |
+| `Nymbra` | Window, settings window, menu bar, input, rendering. | AppKit, CoreText, Metal, NymbraCore, NymbraInput |
 | `NymbraCheck` | The test harness and suites. | NymbraCore, NymbraInput |
+
+### What lives where
+
+The rule is that anything with a right answer belongs in a target that has tests,
+and only the part that needs a screen lives in the app.
+
+| Concern | Home | Why there |
+|---|---|---|
+| Screen model, parser, scrollback | `NymbraCore/Screen.swift`, `Parser.swift` | Thousands of edge cases; must be testable in milliseconds |
+| Settings model, loading, validation | `NymbraCore/Configuration.swift` | "A broken settings file still starts" is a property, not a look |
+| Colour tables, contrast, 256-colour ramp | `NymbraCore/Palette.swift` | "Is this readable?" is arithmetic, and a screenshot cannot answer it |
+| Selection and text extraction | `NymbraCore/Selection.swift` | Copy has an exact expected result |
+| Application commands and shortcut parsing | `NymbraInput/Commands.swift`, `Shortcut.swift` | One list read by the menu bar *and* the settings window, so they cannot drift |
+| `CGColor` conversion, SGR → colours | `Nymbra/Theme.swift` | The only part that needs a graphics context |
+| Font resolution and metrics | `Nymbra/Fonts.swift` | CoreText, and shared by the grid and the preview so they cannot disagree |
+| Grid drawing, selection highlight, clipboard | `Nymbra/TermView.swift` | The renderer |
+| Windows, settings UI, menu bar | `Nymbra/AppController.swift`, `TerminalWindow.swift`, `SettingsWindow.swift`, `AppMenu.swift` | AppKit, and deliberately thin |
 
 ### The dependency rule
 
@@ -60,13 +77,18 @@ shell  ──bytes──▶  PTY master fd
                         │  mutations
                         ▼
                   screen model             (NymbraCore/Screen.swift)
-                        │  damage
+                        │  cells
                         ▼
                   renderer                 (Nymbra/TermView.swift — CoreText now, Metal in M3)
+                        ▲
+                        │  colours, font, grid metrics
+                  settings                 (Configuration ─▶ Palette ─▶ Theme)
 ```
 
 Each stage has one job. The parser never touches a graphics context; the
-renderer never parses escape sequences; the PTY never formats anything.
+renderer never parses escape sequences; the PTY never formats anything. Settings
+enter the renderer as data rather than as a global, which is what makes the
+settings window's live preview a matter of calling one `apply` method.
 
 ## Invariants
 
@@ -83,6 +105,10 @@ These must hold at all times. Add a test when you touch them.
    with live threads and Mach ports is undefined behaviour on macOS.
 6. **The grid is measured, not assumed.** Cell width and height come from
    CoreText metrics for the active font.
+7. **An unreadable colour is a bug, not a preference.** A foreground below 4.5:1
+   against the background it is drawn on is lifted until it clears the bar
+   (`Palette.readable`). `SGR 8` and `SGR 2` are the exceptions — conceal and
+   faint exist to remove contrast.
 
 ## Threading
 
@@ -125,8 +151,13 @@ ADR-0001.
 | Viewport and scrollback | Unit tests on `Screen.displayRows` |
 | Screen model | Unit tests, including resize and scrollback |
 | Parser conformance | Input bytes → expected cells, asserted from `NymbraCheck` |
+| Settings model | Unit tests, including hostile config files that must still start |
+| Colours and legibility | Unit tests on `Palette`, plus `--theme-test` for CI |
+| Selection and copy | Unit tests on `Selection.text(in:scrollOffset:)` |
+| Commands and shortcuts | Unit tests on `Command`/`Shortcut`, including duplicates |
 | PTY | `--pty-test` smoke test in CI |
 | Emulation, end to end | `--screen-test` feeds real shell output through the parser in CI |
+| Menu bar | `--menu-test` prints the menu and its key equivalents |
 | Rendering | Manual + snapshot once Metal lands |
 
 `make check` runs everything that can run without a human.

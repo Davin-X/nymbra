@@ -16,12 +16,19 @@ final class TermView: NSView {
     var onResize: ((Int, Int) -> Void)?
 
     private let screen: Screen
-    private let font: CTFont
-    private let boldFont: CTFont
-    private let cellWidth: CGFloat
-    private let cellHeight: CGFloat
-    private let ascent: CGFloat
-    private let descent: CGFloat
+
+    /// The settings in force. Held rather than read from a global, so the view
+    /// stays a pure function of what it was given — which is what makes the
+    /// settings window's live preview a matter of calling `apply`.
+    private var configuration: Configuration
+    private var theme: Theme
+
+    private var font: CTFont
+    private var boldFont: CTFont
+    private var cellWidth: CGFloat
+    private var cellHeight: CGFloat
+    private var ascent: CGFloat
+    private var descent: CGFloat
     private let paddingX: CGFloat = 10
     private let paddingY: CGFloat = 8
 
@@ -35,15 +42,106 @@ final class TermView: NSView {
     /// so a slow scroll is not rounded away to nothing.
     private var scrollRemainder: CGFloat = 0
 
+    /// Cursor blink phase, and the timer that advances it.
+    private var blinkOn = true
+    private var blinkTimer: Timer?
+
+    /// The current selection, if any. An optional rather than an empty selection,
+    /// so a plain click clears the highlight instead of leaving one cell lit.
+    private var selection: Selection?
+    /// Where a drag started. Kept apart from the selection so that the highlight
+    /// only appears once the pointer has actually moved.
+    private var dragAnchor: Selection.Position?
+
     init(frame: NSRect, screen: Screen, configuration: Configuration) {
         self.screen = screen
+        self.configuration = configuration
+        self.theme = Theme(configuration)
+
+        let metrics = TermView.metrics(for: configuration)
+        self.font = metrics.font
+        self.boldFont = metrics.boldFont
+        self.ascent = metrics.ascent
+        self.descent = metrics.descent
+        self.cellHeight = metrics.cellHeight
+        self.cellWidth = metrics.cellWidth
+
+        self.cols = max(1, Int((frame.width - paddingX * 2) / metrics.cellWidth))
+        self.rows = max(1, Int((frame.height - paddingY * 2) / metrics.cellHeight))
+
+        super.init(frame: frame)
+        screen.scrollbackLimit = configuration.behaviour.scrollbackLines
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateGridSize()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateBlinkTimer()
+    }
+
+    /// Apply new settings. Live: the metrics are re-measured and the grid
+    /// resized with no restart, which is what makes the settings window's
+    /// preview work.
+    func apply(_ newConfiguration: Configuration) {
+        configuration = newConfiguration
+        theme = Theme(newConfiguration)
+
+        let metrics = TermView.metrics(for: newConfiguration)
+        font = metrics.font
+        boldFont = metrics.boldFont
+        ascent = metrics.ascent
+        descent = metrics.descent
+        cellHeight = metrics.cellHeight
+        cellWidth = metrics.cellWidth
+
+        screen.scrollbackLimit = newConfiguration.behaviour.scrollbackLines
+        updateGridSize()
+        updateBlinkTimer()
+        needsDisplay = true
+    }
+
+    private func updateGridSize() {
+        let newCols = max(1, Int((bounds.width - paddingX * 2) / cellWidth))
+        let newRows = max(1, Int((bounds.height - paddingY * 2) / cellHeight))
+        guard newCols != cols || newRows != rows else { return }
+        cols = newCols
+        rows = newRows
+        // A resize invalidates the viewport: the grid moved under it.
+        scrollOffset = 0
+        scrollRemainder = 0
+        onResize?(newCols, newRows)
+        needsDisplay = true
+    }
+
+    // MARK: - Metrics
+
+    private struct Metrics {
+        let font: CTFont
+        let boldFont: CTFont
+        let ascent: CGFloat
+        let descent: CGFloat
+        let cellWidth: CGFloat
+        let cellHeight: CGFloat
+    }
+
+    /// Measure the cell grid from the font rather than assuming it, so every
+    /// glyph lands exactly on the grid.
+    private static func metrics(for configuration: Configuration) -> Metrics {
         let family = configuration.appearance.fontFamily
         let size = CGFloat(configuration.appearance.fontSize)
 
-        // A font family that does not exist would otherwise be substituted
-        // silently and, worse, substituted with something that is not
-        // monospaced, which breaks the grid. Verify the substitution instead,
-        // and fall back to a font we know the metrics of.
+        // A family that does not exist would otherwise be substituted silently
+        // and, worse, possibly with something that is not monospaced, which
+        // breaks the grid. Verify the substitution, and fall back to a font
+        // whose metrics we know.
         let requested = CTFontCreateWithName(family as CFString, size, nil)
         let resolved = CTFontCopyFamilyName(requested) as String
 
@@ -57,41 +155,52 @@ final class TermView: NSView {
             font = CTFontCreateWithName("Menlo" as CFString, size, nil)
         }
 
-        self.font = font
-        self.boldFont = CTFontCreateCopyWithSymbolicTraits(font, 0, nil, .traitBold, .traitBold) ?? font
-        self.ascent = CTFontGetAscent(font)
-        self.descent = CTFontGetDescent(font)
-        self.cellHeight = (ascent + descent + CTFontGetLeading(font)).rounded()
+        let ascent = CTFontGetAscent(font)
+        let descent = CTFontGetDescent(font)
 
         var character: UniChar = 0x4D  // 'M': the advance every mono glyph shares
         var glyph = CGGlyph()
         CTFontGetGlyphsForCharacters(font, &character, &glyph, 1)
         var advance = CGSize.zero
         CTFontGetAdvancesForGlyphs(font, .horizontal, &glyph, &advance, 1)
-        self.cellWidth = advance.width
 
-        self.cols = max(1, Int((frame.width - paddingX * 2) / advance.width))
-        self.rows = max(1, Int((frame.height - paddingY * 2) / cellHeight))
-        super.init(frame: frame)
+        return Metrics(
+            font: font,
+            boldFont: CTFontCreateCopyWithSymbolicTraits(font, 0, nil, .traitBold, .traitBold) ?? font,
+            ascent: ascent,
+            descent: descent,
+            cellWidth: advance.width,
+            cellHeight: (ascent + descent + CTFontGetLeading(font)).rounded()
+        )
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+    // MARK: - Cursor
 
-    override var acceptsFirstResponder: Bool { true }
+    private var cursorStyle: Screen.CursorStyle {
+        screen.effectiveCursorStyle(preference: configuration.behaviour.cursorShape,
+                                    blinks: configuration.behaviour.cursorBlinks)
+    }
 
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        let newCols = max(1, Int((newSize.width - paddingX * 2) / cellWidth))
-        let newRows = max(1, Int((newSize.height - paddingY * 2) / cellHeight))
-        if newCols != cols || newRows != rows {
-            cols = newCols
-            rows = newRows
-            // A resize invalidates the viewport: the grid moved under it.
-            scrollOffset = 0
-            scrollRemainder = 0
-            onResize?(newCols, newRows)
-            needsDisplay = true
+    /// Blink only when the shape asks for it, the setting allows it, and the
+    /// window is focused: a blinking cursor in an unfocused window is noise.
+    private func updateBlinkTimer() {
+        blinkTimer?.invalidate()
+        blinkTimer = nil
+        blinkOn = true
+
+        guard window != nil, cursorStyle.blinks, configuration.behaviour.cursorBlinks else { return }
+        blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self, self.window?.isKeyWindow == true else { return }
+            self.blinkOn.toggle()
+            self.needsDisplay = true
         }
+    }
+
+    /// Typing shows the cursor immediately rather than waiting for the next
+    /// tick, so a keystroke never feels unacknowledged.
+    private func restartBlink() {
+        guard blinkTimer != nil else { return }
+        blinkOn = true
     }
 
     // MARK: - Drawing
@@ -107,12 +216,15 @@ final class TermView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        ctx.setFillColor(Theme.background)
+        ctx.setFillColor(theme.background)
         ctx.fill(bounds)
 
         // One path for history and live output: ask the model for the rows at
         // the current scroll position, and draw them.
         let lines = screen.displayRows(scrollOffset: scrollOffset)
+
+        // The selection goes under the text, so the text keeps its own colours.
+        drawSelection(ctx)
         for (row, line) in lines.enumerated() { drawRow(line, row: row, ctx: ctx) }
 
         // The cursor belongs to the live screen, so it is not drawn while the
@@ -143,7 +255,7 @@ final class TermView: NSView {
         attributes: Attributes,
         ctx: CGContext
     ) {
-        let (foreground, background) = Theme.resolve(attributes, reversed: screen.reverseVideo)
+        let (foreground, background) = theme.resolve(attributes, reversed: screen.reverseVideo)
         let hasInk = text.contains { $0 != " " }
         if !hasInk && background == nil { return }
 
@@ -173,28 +285,56 @@ final class TermView: NSView {
         CTLineDraw(line, ctx)
     }
 
+    /// One rectangle per selected run of cells, rather than one per cell: a
+    /// screenful of selections is otherwise hundreds of fills.
+    private func drawSelection(_ ctx: CGContext) {
+        guard let selection, !selection.isEmpty else { return }
+        let (start, end) = selection.ordered
+        ctx.setFillColor(theme.selection)
+
+        for row in start.row...max(start.row, end.row) {
+            guard row >= 0, row < rows else { continue }
+            let first = row == start.row ? start.col : 0
+            let last = row == end.row ? end.col : cols - 1
+            guard first <= last else { continue }
+            let origin = cellOrigin(col: first, row: row)
+            ctx.fill(CGRect(x: origin.x, y: origin.y,
+                            width: CGFloat(last - first + 1) * cellWidth,
+                            height: cellHeight))
+        }
+    }
+
     private func drawCursor(_ ctx: CGContext) {
         guard screen.cursor.visible else { return }
+
+        // The user's preference applies until a program asks for a shape of its
+        // own with DECSCUSR; after that the program wins, which is what `vim`
+        // and `fish` expect.
+        let style = cursorStyle
+        if style.blinks, !blinkOn { return }
+
         let cursor = screen.cursor
         let origin = cellOrigin(col: cursor.col, row: cursor.row)
 
-        switch cursor.style {
+        switch style {
         case .bar, .barBlink:
-            ctx.setFillColor(Theme.cursor)
+            ctx.setFillColor(theme.cursor)
             ctx.fill(CGRect(x: origin.x, y: origin.y, width: 2, height: cellHeight))
         case .underline, .underlineBlink:
-            ctx.setFillColor(Theme.cursor)
+            ctx.setFillColor(theme.cursor)
             ctx.fill(CGRect(x: origin.x, y: origin.y, width: cellWidth, height: 2))
-        default:
+        case .block, .blockBlink:
             let cell = screen.cell(row: cursor.row, col: cursor.col)
-            ctx.setFillColor(Theme.cursor)
+            ctx.setFillColor(theme.cursor)
             ctx.fill(CGRect(x: origin.x, y: origin.y, width: cellWidth, height: cellHeight))
             guard !cell.isBlank, !cell.isWideContinuation else { return }
+            // The glyph under a block cursor is drawn in the background colour,
+            // so it stays readable rather than becoming a silhouette.
             let line = CTLineCreateWithAttributedString(NSAttributedString(
                 string: cell.text,
                 attributes: [
                     .init(kCTFontAttributeName as String): font,
-                    .init(kCTForegroundColorAttributeName as String): Theme.background,
+                    .init(kCTForegroundColorAttributeName as String): theme.background,
                 ]
             ))
             ctx.textPosition = CGPoint(x: origin.x, y: baseline(row: cursor.row))
@@ -207,16 +347,15 @@ final class TermView: NSView {
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        // Command chords belong to the application: Cmd+V pastes, Cmd+C will
-        // copy.
-        if flags.contains(.command) {
-            if event.charactersIgnoringModifiers?.lowercased() == "v" { paste(nil) }
-            return
-        }
+        // Command chords belong to the application, and the menu bar handles
+        // them: its key equivalents come from the same command list the settings
+        // window shows. There is nothing here to send to the program.
+        if flags.contains(.command) { return }
 
         // Typing returns to the live screen, the way every terminal behaves: you
         // cannot type into history.
         returnToLiveScreen()
+        restartBlink()
 
         // The mapping itself lives in NymbraInput, where it is asserted without
         // a window. This method is only the AppKit boundary.
@@ -285,6 +424,103 @@ final class TermView: NSView {
         onInput?(newlinesRemoved)
     }
 
+    // MARK: - Selection
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        let point = convert(event.locationInWindow, from: nil)
+        guard let position = cellPosition(at: point) else { return }
+
+        if event.clickCount == 2 {
+            selection = Selection.word(in: screen, row: position.row, col: position.col,
+                                       scrollOffset: scrollOffset)
+            dragAnchor = nil
+        } else if event.clickCount >= 3 {
+            selection = Selection.line(in: screen, row: position.row, scrollOffset: scrollOffset)
+            dragAnchor = nil
+        } else if event.modifierFlags.contains(.shift), let existing = selection {
+            // Shift-click extends what is already selected rather than starting
+            // again.
+            selection = Selection(anchor: existing.anchor, head: position)
+            dragAnchor = nil
+        } else {
+            selection = nil
+            dragAnchor = position
+        }
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        // A drag after a double-click keeps the word selected; only a plain drag
+        // starts a new selection.
+        guard let anchor = dragAnchor else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard let position = cellPosition(at: point) else { return }
+        selection = Selection(anchor: anchor, head: position)
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        dragAnchor = nil
+    }
+
+    /// The cell under a point, in viewport coordinates. Points outside the grid
+    /// clamp to the nearest cell, so dragging off the edge selects to the edge
+    /// rather than stopping dead.
+    private func cellPosition(at point: CGPoint) -> Selection.Position? {
+        let relative = bounds.height - paddingY - point.y
+        let row = Int((relative / cellHeight).rounded(.up)) - 1
+        let col = Int((point.x - paddingX) / cellWidth)
+        return Selection.Position(row: min(max(row, 0), max(0, rows - 1)),
+                                  col: min(max(col, 0), max(0, cols - 1)))
+    }
+
+    // MARK: - Clipboard
+
+    /// Copy the selection. Returns whether anything was copied, so the caller can
+    /// tell "nothing selected" from "copied".
+    @discardableResult
+    func copySelectionToPasteboard() -> Bool {
+        guard let selection else { return false }
+        let text = selection.text(in: screen, scrollOffset: scrollOffset)
+        guard !text.isEmpty else { return false }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        return true
+    }
+
+    /// Paste, wrapped in the bracketed-paste guards when the program asked for
+    /// them, so a paste is not read as typing. Newlines become carriage returns,
+    /// which is what a line editor expects from a paste.
+    func pasteFromPasteboard() {
+        guard let text = NSPasteboard.general.string(forType: .string) else { return }
+        var bytes = Array(text.utf8)
+        if screen.bracketedPaste {
+            bytes = Array("\u{1B}[200~".utf8) + bytes + Array("\u{1B}[201~".utf8)
+        }
+        onInput?(bytes.map { $0 == 0x0A ? 0x0D : $0 })
+    }
+
+    func selectEverything() {
+        guard scrollOffset == 0 else {
+            // Selecting while scrolled back would select history the user cannot
+            // see the end of, so return to the live screen first.
+            returnToLiveScreen()
+            return
+        }
+        selection = Selection.all(of: screen)
+        needsDisplay = true
+    }
+
+    /// Clear the screen and the saved lines. `ED 3` is exactly "erase saved
+    /// lines", which is the same thing xterm's Clear Scrollback does.
+    func clearBuffer() {
+        selection = nil
+        screen.eraseInDisplay(3)
+        returnToLiveScreen()
+        needsDisplay = true
+    }
+
     override func doCommand(by selector: Selector) {
         // Swallow the system beep for keys we do not handle.
         if selector == #selector(NSResponder.insertNewline(_:)) { return }
@@ -292,62 +528,4 @@ final class TermView: NSView {
     }
 }
 
-/// The colour scheme, in one place so M2's themes have an obvious home.
-enum Theme {
-    static let background = CGColor(red: 0.043, green: 0.055, blue: 0.094, alpha: 1)
-    static let foreground = CGColor(red: 0.85, green: 0.90, blue: 1.0, alpha: 1)
-    static let cursor = CGColor(red: 0.85, green: 0.90, blue: 1.0, alpha: 1)
 
-    /// Resolve a pair of attributes to concrete colours. `nil` means "the
-    /// default background", which lets a run with no background skip its
-    /// rectangle entirely.
-    static func resolve(_ attributes: Attributes, reversed: Bool) -> (CGColor, CGColor?) {
-        var foreground = attributes.foreground
-        var background = attributes.background
-        if attributes.inverse != reversed {
-            swap(&foreground, &background)
-        }
-        if attributes.conceal {
-            foreground = background
-        }
-        let fg = resolve(foreground) ?? Self.foreground
-        let bg = resolve(background)
-        return (fg, bg)
-    }
-
-    private static func resolve(_ colour: Colour) -> CGColor? {
-        switch colour {
-        case .default: return nil
-        case .indexed(let index): return palette[Int(index)]
-        case .rgb(let r, let g, let b):
-            return CGColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: 1)
-        }
-    }
-
-    /// The xterm 256-colour palette: 16 system colours, a 6×6×6 cube, then a
-    /// 24-step greyscale ramp.
-    static let palette: [CGColor] = {
-        let system: [(Int, Int, Int)] = [
-            (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),
-            (0, 0, 238), (205, 0, 205), (0, 205, 205), (229, 229, 229),
-            (127, 127, 127), (255, 0, 0), (0, 255, 0), (255, 255, 0),
-            (92, 92, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255),
-        ]
-        var colours = system.map {
-            CGColor(red: CGFloat($0.0) / 255, green: CGFloat($0.1) / 255, blue: CGFloat($0.2) / 255, alpha: 1)
-        }
-        let levels: [CGFloat] = [0, 95, 135, 175, 215, 255].map { $0 / 255 }
-        for r in levels {
-            for g in levels {
-                for b in levels {
-                    colours.append(CGColor(red: r, green: g, blue: b, alpha: 1))
-                }
-            }
-        }
-        for step in 0..<24 {
-            let value = CGFloat(8 + step * 10) / 255
-            colours.append(CGColor(red: value, green: value, blue: value, alpha: 1))
-        }
-        return colours
-    }()
-}

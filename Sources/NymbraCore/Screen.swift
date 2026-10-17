@@ -22,6 +22,15 @@ public final class Screen {
         case bar
         case barBlink
 
+        /// Whether the shape blinks, so callers that only care about that do not
+        /// have to pattern-match on all six cases.
+        public var blinks: Bool {
+            switch self {
+            case .blockBlink, .underlineBlink, .barBlink: return true
+            case .block, .underline, .bar: return false
+            }
+        }
+
         /// DECSCUSR's parameter space is not one-to-one with the shapes: 0 and 1
         /// both mean a blinking block, and 6 is a steady bar. A `rawValue` enum
         /// cannot express that, which is how the first version got it wrong.
@@ -627,6 +636,25 @@ public final class Screen {
     /// DECSCUSR.
     public func setCursorStyle(_ style: CursorStyle) {
         cursor.style = style
+        cursorStyleChosen = true
+    }
+
+    /// True once the running program has chosen a cursor shape. Until it has,
+    /// the user's preference applies; after that the program's request wins,
+    /// which is what `vim` and `fish` expect.
+    public private(set) var cursorStyleChosen = false
+
+    /// The shape to draw.
+    public func effectiveCursorStyle(
+        preference: Configuration.Behaviour.CursorShape,
+        blinks: Bool
+    ) -> CursorStyle {
+        if cursorStyleChosen { return cursor.style }
+        switch preference {
+        case .block: return blinks ? .blockBlink : .block
+        case .bar: return blinks ? .barBlink : .bar
+        case .underline: return blinks ? .underlineBlink : .underline
+        }
     }
 
     // MARK: - SGR

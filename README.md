@@ -21,12 +21,12 @@ $ otool -L .build/release/Nymbra
 > and emulates cursor movement, colour, erasing, line and character editing,
 > scroll regions, the alternate screen, wrapping and resize. Full-screen
 > programs are exercised in CI by feeding real terminal output through the
-> parser.
+> parser. Settings are real, too: a JSON file, a settings window with a live
+> preview, three palettes, and select-and-copy.
 >
-> It is not yet a daily driver. Missing: tabs and splits, text selection and
-> copy, search, mouse reporting (the modes are tracked, but no bytes are sent
-> yet), text reflow on resize, a settings *window* (the model and the file exist;
-> the window does not), and the Metal renderer.
+> It is not yet a daily driver. Missing: tabs and splits, search, mouse reporting
+> (the modes are tracked, but no bytes are sent yet), text reflow on resize, and
+> the Metal renderer that will replace CoreText drawing.
 >
 > See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned and
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it is built.
@@ -65,6 +65,25 @@ make build
 
 There are no binary releases yet.
 
+## Settings
+
+Press **Cmd+,** (or use the application menu) to open the settings window. Changes
+apply to the open terminal as you make them — the preview is a real terminal
+drawing with the same code and the same colours as the window behind it, not a
+mock-up. Reset shows what will change before it changes anything.
+
+Settings live in one hand-editable JSON file:
+
+```
+~/Library/Application Support/Nymbra/config.json
+```
+
+Set `$NYMBRA_CONFIG` to point somewhere else — that is how the tests and CI run
+without touching your settings. Loading is deliberately total: a missing file is
+the defaults, a malformed one is the defaults plus a warning, and an unknown key
+from a future version is ignored. A terminal must never refuse to start because
+of its own settings file.
+
 ## Development
 
 | Command | Purpose |
@@ -76,6 +95,17 @@ There are no binary releases yet.
 | `make check` | Everything CI runs |
 | `make clean` | Remove build output |
 
+The binary also prints things a test runner cannot look at, so that they can be
+asserted in text rather than by eye:
+
+| Flag | Prints |
+|---|---|
+| `--screen-test "<cmd>"` | The screen after running `<cmd>` in a real shell |
+| `--screen-debug "<cmd>"` | The same screen with blanks shown as `·` |
+| `--theme-test` | Every preset, and the contrast of every colour in it |
+| `--menu-test` | The menu bar and its key equivalents |
+| `--settings-test` | The settings window's tabs and what each control loaded |
+
 `make check` is the gate: it must pass before any change is considered done.
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -83,11 +113,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```
                 ┌──────────────┐
-                │   Nymbra     │  AppKit window, CoreText renderer
+                │   Nymbra     │  windows, settings window, CoreText renderer
                 └──────┬───────┘
                        │ depends on
                 ┌──────▼───────┐
-                │ NymbraCore   │  PTY, screen buffer, (planned) VT parser
+                │ NymbraCore   │  PTY, VT parser, screen model, config, palette
                 └──────┬───────┘
                        │ depends on
                 ┌──────▼───────┐
@@ -109,9 +139,9 @@ Full detail, including the threading model and the invariants that must hold:
 |---|---|---|
 | M0 | PTY, window, CoreText grid, tests, CI | ✅ complete |
 | M1 | VT emulation, keyboard, scrollback viewport | ✅ core complete |
+| M2 | Settings, configuration, palettes, select and copy | ✅ complete |
 | M1.x | Tabs and splits | ⏳ next |
-| M2 | Settings and configuration, with live preview | planned |
-| M3 | Metal renderer, text selection, reflow, mouse | planned |
+| M3 | Metal renderer, search, reflow, mouse | planned |
 | M4 | Shell integration (OSC 133) and notifications | planned |
 | M5 | Sessions: a PTY host that outlives the window | planned |
 | M6 | Signed, notarized release and updater | planned |

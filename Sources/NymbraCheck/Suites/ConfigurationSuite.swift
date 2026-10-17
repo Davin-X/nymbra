@@ -60,6 +60,16 @@ func configurationSuite(_ h: Harness) {
 
     // MARK: Reset
 
+    var editedSections = Configuration()
+    editedSections.appearance.fontSize = 20
+    editedSections.colours.preset = .light
+    h.equal(editedSections.differingSections(from: defaults), ["Appearance", "Colours"],
+            "Reset can say which sections it would discard")
+    h.equal(defaults.differingSections(from: defaults), [],
+            "Reset on an unedited configuration reports nothing to discard")
+    h.equal(Configuration().differingSections(from: editedSections), ["Appearance", "Colours"],
+            "the difference does not depend on which way round it is compared")
+
     let resettable = tempURL()
     do {
         try edited.save(to: resettable)
