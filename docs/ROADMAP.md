@@ -108,19 +108,26 @@ The milestone that makes this a terminal rather than a demo.
   Headless CI covers clear, SGR, the alternate screen, wrapping and wide
   characters.
 
-**Evidence:** 952 checks pass; `--resize-test` proves the shell and the view
+**Evidence:** 968 checks pass; `--resize-test` proves the shell and the view
 agree on the grid; `Scripts/emulation-checks.sh` drives real shell output through
 the parser, and CI asserts the result without a window.
 
 **Non-goals:** ligatures, image protocols, Kitty keyboard protocol.
 
-### M1.x — Tabs and splits 🔜 *still owed from M1*
+### M1.x — Tabs and splits 🔨 *in progress*
 
 A terminal with one pane is a toy. Broken out of M1 deliberately, so that the
 emulation core could be finished and verified first — and now the natural next
 step, since M2 has landed.
 
-**Scope**
+**Done first, because it blocked all of this:** a shell can be started at any
+time. `forkpty()` forks the application and is only safe before AppKit starts, so
+nothing could open a second shell — not a new window, not a tab, not a split.
+Shells are started with `openpty()` + `posix_spawn()` (ADR-0007), the first window
+is made by the same code path as every other, and closing a window is no longer a
+dead end: `⌘N` and a Dock click both bring one back, with a live shell in it.
+
+**Still to do**
 - Tabs, with the unread badge M4 will fill in
 - Horizontal and vertical splits, resizable
 - Focus follows a click; keyboard navigation between panes

@@ -24,7 +24,7 @@ is a bug — fix it in the same pull request.
 
 | Target | Responsibility | May import |
 |---|---|---|
-| `CPTY` | `forkpty()`, `TIOCSWINSZ`. The only C in the project. | Darwin |
+| `CPTY` | `openpty()`, `posix_spawn()`, `TIOCSWINSZ`. The only C in the project. | Darwin |
 | `NymbraCore` | PTY lifecycle, VT parsing, screen model, scrollback, configuration, colour tables, selection. No UI. | Foundation, CPTY |
 | `NymbraInput` | Keyboard mapping: a key press to the bytes a terminal sends, and the application's own commands and shortcuts. No UI. | Foundation |
 | `Nymbra` | Window, settings window, menu bar, input, rendering. | AppKit, CoreText, Metal, NymbraCore, NymbraInput |
@@ -101,12 +101,14 @@ These must hold at all times. Add a test when you touch them.
 3. **The parser is total.** Any byte sequence, valid or hostile, must leave the
    model in a well-defined state. It may not crash, hang, or allocate unboundedly.
 4. **One session, one reader.** Exactly one thread reads a given PTY master.
-5. **`forkpty()` runs before AppKit starts, and the child touches nothing but
-   POSIX.** See ADR-0002. Forking a process with live threads is undefined
-   behaviour, and the child may only make async-signal-safe calls — no
-   Foundation, no Objective-C, not even implicitly by bridging a `String`. The
-   child that broke this rule was killed by the runtime itself, and the PTY's
-   echo made it look like a working shell.
+5. **The process is never forked.** Shells are started with `openpty()` +
+   `posix_spawn()` (ADR-0007); `fork()` is not called anywhere in Nymbra, and no
+   code of ours runs between the spawn and the `exec`. This is the strongest
+   available form of the rule that ADR-0002 introduced, which was "the child may
+   only make async-signal-safe calls" — a rule the child has now stopped needing,
+   because there is no child code. It is also what allows a shell to be started at
+   any time, with AppKit and its threads already running, which is what tabs,
+   splits and "New Window" all required.
 6. **The grid is measured, not assumed.** Cell width and height come from
    CoreText metrics for the active font.
 7. **An unreadable colour is a bug, not a preference.** A foreground below 4.5:1

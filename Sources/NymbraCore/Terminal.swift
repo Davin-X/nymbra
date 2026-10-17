@@ -30,9 +30,10 @@ public final class Terminal {
     /// The grid is one value rather than two integers so that the rows and the
     /// columns cannot be handed over in the wrong order; see `GridSize`.
     ///
-    /// Must be constructed before AppKit is initialised: `forkpty` forks, and
-    /// forking a process with live threads and Mach ports is undefined behaviour.
-    /// See ADR-0002.
+    /// May be constructed at any time, including with AppKit already running and
+    /// other shells live: shells are started with `posix_spawn`, so this process
+    /// is never forked (ADR-0007). That is what makes more than one window, and
+    /// later more than one pane, possible at all.
     public init(
         size: GridSize,
         shell: String? = nil,

@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — closing the window was a dead end
+
+Clicking the red button ended the shell and left Nymbra running with no window,
+no way to make another one, and no response to a Dock click. The only route back
+to a terminal was to quit and start again. There was no `New Window` item either,
+and the reason was structural rather than an oversight: the shell was started with
+`forkpty()`, which forks the application, and that is not safe once AppKit has
+started — so the one window had to be spawned before the application existed
+(ADR-0002), and a second shell had nowhere to come from.
+
+- Shells are now started with `openpty()` + `posix_spawn()`, so a shell can be
+  started at any time. ADR-0002 is superseded by
+  [ADR-0007](docs/adr/0007-posix-spawn-instead-of-forkpty.md), and invariant 5 is
+  stronger than it was: `fork()` is not called anywhere in Nymbra and no code of
+  ours runs between the spawn and the `exec`, so the entire class of post-fork
+  hazards is unrepresentable rather than merely avoided.
+- `File ▸ New Window` (**⌘N**), a rebindable `Command` like every other shortcut,
+  so the settings window shows it and refuses a duplicate.
+- `applicationShouldHandleReopen` brings a window back — the one still open, or a
+  new one — and closing the last window leaves Nymbra running, as a terminal
+  should, rather than leaving it running by accident with no way to a shell.
+- A closed window is pruned only when the application next needs a window, never
+  from inside `windowWillClose`, where releasing the last reference would
+  deallocate a window in the middle of closing it.
+- If a shell cannot be started at all — a bad `shell.path`, a shell without the
+  execute bit — the failure is now reported by the parent, in an alert and on
+  stderr, instead of being written onto a terminal that no longer has a child to
+  write it.
+
+### Fixed — a new shell started in `/`, not in `~`
+
+A shell inherits the working directory of the process that starts it, and a
+process opened from the Finder or the Dock starts in `/`. A shell in `/` cannot
+create a file, so the first `mkdir` or `git clone` failed. The shell is now given
+a working directory explicitly (`posix_spawn_file_actions_addchdir_np`), without
+`chdir()`ing the application out from under its own threads, and `PWD` is set to
+match, because shells trust it for `cd -` and for their prompt. Home is the
+default — inheritance from a GUI process is worth nothing, and `~` is what the
+platform's own terminals choose — and `spawnShell(workingDirectory:)` sets it for
+callers that want otherwise.
+
+### Added — proofs for the things that fail silently
+
+Every failure above is quiet: a shell without a controlling terminal still prints
+a prompt; a window that cannot reopen still looks like a running application; a
+shell in `/` still runs commands. So each one is now asked directly.
+
+- `--window-test` (`make window-test`, a CI step) closes a window, reopens it, and
+  requires the new shell to *evaluate* a command — `$((6*7))` only exists as 42 if
+  it ran. Nothing is ever shown.
+- `PTYSuite` asks the kernel about the terminal the shell was given: that the shell
+  is its foreground process group, that a background job gets its own group, that
+  **Ctrl+C ends that job** and hands the terminal back, that `SIGPIPE` is at its
+  default rather than inherited as ignored, and that `/bin/pwd` prints the
+  directory the shell was told to use.
+- `PTYSuite` also starts eight shells while four other threads allocate and
+  initialise Foundation types — the situation the old rule existed to avoid, and
+  the one a forked child could not survive.
+- `--pty-test` now prints `tty` and `/bin/pwd` alongside `TERM`, so a CI log shows
+  the terminal the shell got and where it started.
+
 ### Added — five more colour presets, and a rule that produced them
 
 Three presets was a demo of the colour system rather than a choice. There are now
@@ -104,7 +165,7 @@ Dock, nothing to drag to `/Applications`, and nothing to hand to another person.
   text for the same reason `--screen-test` exists: CI cannot look at a window.
 - The settings window's Reset shows **what will change**, as a diff, rather than
   silently wiping.
-- 952 checks, up from 246: palette, selection, shortcut, PTY and grid suites,
+- 968 checks, up from 246: palette, selection, shortcut, PTY and grid suites,
   plus the existing configuration suite and its sixteen hostile files.
 
 ### Fixed — `ls` appeared to hide filenames

@@ -13,11 +13,16 @@ public struct PTY {
 }
 
 public enum PTYError: Error, CustomStringConvertible {
-    case spawnFailed
+    /// The shell could not be started, with the system's reason. Carried as a
+    /// string because the message is the whole value of the error: "cannot run
+    /// /opt/homebrew/bin/fish: No such file or directory" tells a person what to
+    /// fix, and `spawnFailed` on its own does not.
+    case spawnFailed(shell: String, reason: String)
 
     public var description: String {
         switch self {
-        case .spawnFailed: return "forkpty failed"
+        case let .spawnFailed(shell, reason):
+            return "cannot run \(shell): \(reason)"
         }
     }
 }
@@ -46,59 +51,56 @@ public func resolveShell(_ explicitShell: String? = nil) -> String {
     return "/bin/sh"
 }
 
-/// Fork the user's login shell onto a new PTY.
+/// Where a new shell starts when nothing else is asked for.
 ///
-/// Everything the child needs is built **here**, before the fork: after `forkpty`
-/// the child may call nothing but async-signal-safe functions, and in particular
-/// may not touch Foundation. This is not pedantry. The child inherits the whole
-/// Objective-C runtime, and using it — even by bridging a Swift `String` to
-/// `NSString`, which is what `lastPathComponent` does — can be fatal:
+/// Deliberately not the application's own working directory. An application
+/// opened from the Finder or the Dock starts in `/`, and a shell in `/` cannot
+/// create a file — which is exactly what "new window" must never do. A terminal
+/// that inherits nothing useful has to choose somewhere, and home is what the
+/// platform's own terminals choose and what a person expects.
+public func defaultWorkingDirectory() -> String {
+    let home = NSHomeDirectory()
+    return home.isEmpty || access(home, X_OK) != 0 ? "/" : home
+}
+
+/// Start the user's login shell on a new PTY.
+///
+/// Started with `posix_spawn`, not `forkpty` (ADR-0007). That matters beyond
+/// taste: `forkpty` forks *this* process, so it is only safe while the process
+/// is a single thread, and every shell after the first — a new window, a tab, a
+/// split — is started with AppKit already running. `posix_spawn` execs without
+/// running any of this process's code in between, so there is no window in which
+/// an inherited Objective-C runtime can be touched by a half-forked child.
+///
+/// That window is not hypothetical. It is what CI reported, unchanged, for
+/// several commits while the first window was still forked:
 ///
 ///     objc[4452]: +[NSPathStore2 initialize] may have been in progress in
 ///     another thread when fork() was called ... Crashing instead.
 ///
-/// That message is what CI collected, unchanged, for several commits: the shell
-/// never started, and the only thing on the terminal was the line discipline
-/// echoing back what had been typed — which reads exactly like a broken emulator
-/// and was a broken child.
-public func spawnShell(rows: Int, cols: Int, shell explicitShell: String? = nil) throws -> PTY {
+/// The shell never started; all anyone saw was the line discipline echoing back
+/// what had been typed, which reads exactly like a broken emulator.
+public func spawnShell(rows: Int, cols: Int, shell explicitShell: String? = nil,
+                       workingDirectory: String? = nil) throws -> PTY {
     let shellPath = resolveShell(explicitShell)
+    let directory = workingDirectory ?? defaultWorkingDirectory()
 
-    // The path, the arguments, the environment and the failure message are all
-    // prepared in the parent, because the child can only hand pointers to
-    // `execve` and `write`.
-    let path = strdup(shellPath)
+    // argv[0] is the bare name, as a login shell expects, and the environment is
+    // built here rather than inherited blindly: TERM is what makes full-screen
+    // programs emit the right escape sequences.
     let argv = CStringVector([basename(of: shellPath), "-l"])
-    let envp = CStringVector(childEnvironment())
-    let failure = Array("nymbra: cannot run \(shellPath): ".utf8)
+    let envp = CStringVector(childEnvironment(directory: directory))
     defer {
-        free(path)
         argv.deallocate()
         envp.deallocate()
     }
 
     var master: Int32 = -1
-    let pid = cpty_spawn(&master, UInt16(rows), UInt16(cols))
-
-    if pid == 0 {
-        execve(path, argv.pointer, envp.pointer)
-
-        // `execve` only returns when it failed. Say so on the terminal itself
-        // rather than exiting silently: "the terminal printed nothing" is a far
-        // worse bug report than "cannot run /bin/typo: No such file or
-        // directory". Plain C and the standard library only, no Foundation —
-        // see the note above.
-        failure.withUnsafeBufferPointer { buffer in
-            _ = write(2, buffer.baseAddress, buffer.count)
-        }
-        if let reason = strerror(errno) {
-            _ = write(2, reason, strlen(reason))
-        }
-        _ = "\r\n".withCString { write(2, $0, strlen($0)) }
-        _exit(127)
+    let pid = cpty_spawn(&master, UInt16(rows), UInt16(cols), shellPath,
+                         argv.pointer, envp.pointer, directory)
+    guard pid > 0 else {
+        throw PTYError.spawnFailed(shell: shellPath, reason: String(cString: strerror(errno)))
     }
-
-    guard pid > 0 else { throw PTYError.spawnFailed }
     return PTY(master: master, pid: pid)
 }
 
@@ -111,20 +113,23 @@ private func basename(of path: String) -> String {
 /// The environment the shell starts with. A terminal has to declare what it is
 /// before a program can ask: `TERM` is what makes full-screen programs emit the
 /// right escape sequences, and true-colour programs check `COLORTERM`.
-private func childEnvironment() -> [String] {
+private func childEnvironment(directory: String) -> [String] {
     var environment = ProcessInfo.processInfo.environment
     environment["TERM"] = "xterm-256color"
     environment["COLORTERM"] = "truecolor"
     environment["LANG"] = "en_US.UTF-8"
+    // `PWD` has to agree with where the child actually is: shells trust it for
+    // `cd -` and for their prompt, and an inherited value naming a different
+    // directory is a lie the child cannot detect.
+    environment["PWD"] = directory
     return environment.map { "\($0.key)=\($0.value)" }
 }
 
-/// A NULL-terminated `char *` array, filled in the parent and handed to `execve`
-/// in the child.
+/// A NULL-terminated `char *` array for `posix_spawn`.
 ///
-/// It exists so that no allocation or bridging happens between the fork and the
-/// exec: `forkpty` forks a process that may hold allocator and runtime locks on
-/// other threads, and a child that takes one of those locks never returns.
+/// It owns the strings for as long as the array lives, because `posix_spawn`
+/// reads `argv` and `envp` in the parent before the child exists; the caller
+/// therefore keeps this alive until the spawn returns.
 private final class CStringVector {
     private let storage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>
     private let count: Int

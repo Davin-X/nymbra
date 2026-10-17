@@ -3,7 +3,7 @@
 # asking *inside* a recipe can race the build that just finished.
 bin = $(shell swift build -c release --show-bin-path 2>/dev/null)
 
-.PHONY: help build test run app launch install dist pty-test screen-test resize-test check clean
+.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test check clean
 
 help:
 	@echo "make build       - release build"
@@ -16,6 +16,7 @@ help:
 	@echo "make pty-test    - headless proof that the PTY runs a login shell"
 	@echo "make screen-test - assertions against real shell output, fed through the parser"
 	@echo "make resize-test - proof that the view and the shell agree on the grid"
+	@echo "make window-test - close a window, get a working one back"
 	@echo "make check       - everything CI runs (build + tests + headless proofs)"
 	@echo "make clean       - remove build output"
 
@@ -61,7 +62,12 @@ screen-test: build
 resize-test: build
 	"$(bin)/Nymbra" --resize-test
 
-check: test pty-test screen-test resize-test
+# Closing the window with the red button used to be a dead end. A window is
+# created here, but never shown, and the shell it starts is a real one.
+window-test: build
+	"$(bin)/Nymbra" --window-test
+
+check: test pty-test screen-test resize-test window-test
 
 clean:
 	swift package clean

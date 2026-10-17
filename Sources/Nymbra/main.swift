@@ -19,7 +19,7 @@ func runPTYTest(shell: String?) {
         FileHandle.standardError.write(Data("nymbra: pty-test shell \(resolved)\n".utf8))
 
         let terminal = try Terminal(size: GridSize(rows: 24, cols: 80), shell: resolved)
-        terminal.send("echo PTY_OK; echo TERM=$TERM; tty; id -un; uname -m; exit\n")
+        terminal.send("echo PTY_OK; echo TERM=$TERM; tty; /bin/pwd; id -un; uname -m; exit\n")
 
         var output = [UInt8]()
         var chunk = [UInt8](repeating: 0, count: 4096)
@@ -176,6 +176,68 @@ func runResizeTest(configuration: Configuration) {
     }
 }
 
+/// Close a window and get a working one back.
+///
+/// This is the one thing a person does without thinking, and it was completely
+/// broken: the red button ended the shell, the application stayed alive with no
+/// window, and a Dock click did nothing — the only way back to a terminal was to
+/// quit and start again. A dead end is easy to fix and just as easy to break
+/// again, so the whole round trip is asserted here rather than checked by hand.
+///
+/// It is a window-lifecycle question, so it needs AppKit. It is still headless:
+/// nothing is shown, and the answer is one printed line.
+func runWindowTest(configuration: Configuration) -> Bool { // swiftlint:disable:this function_body_length
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+
+    // Closing is not the part worth testing; getting a *live* shell back is. The
+    // dialogue that guards a running command is switched off for the test,
+    // because a modal question in a headless process is a hang, not a failure.
+    var quiet = configuration
+    quiet.behaviour.confirmBeforeClosingRunningSession = false
+
+    let controller = AppController(configuration: quiet)
+    guard let first = controller.makeWindow() else {
+        print("window-test\tFAIL: no window could be made")
+        return false
+    }
+
+    // The red button, as far as the application is concerned.
+    first.window.performClose(nil)
+    guard first.isClosed else {
+        print("window-test\tFAIL: closing the window did not record it as closed")
+        return false
+    }
+
+    // A Dock click, or `open` on the bundle.
+    guard let second = controller.reopenWindow(), second !== first else {
+        print("window-test\tFAIL: reopening produced no new window")
+        return false
+    }
+
+    // The shell in the new window has to be a live process, not a corpse with a
+    // prompt already drawn on it. `$((6*7))` only exists as 42 if it ran.
+    second.terminal.send("echo NYMBRA_REOPEN_$((6*7))\n")
+    let deadline = Date().addingTimeInterval(5)
+    var screen = ""
+    while Date() < deadline {
+        // The screen is only ever touched on the main queue, so the run loop has
+        // to turn for the output to arrive.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        screen = second.terminal.screen.dump()
+        if screen.contains("NYMBRA_REOPEN_42") { break }
+    }
+
+    let ran = screen.contains("NYMBRA_REOPEN_42")
+    let alive = kill(second.terminal.pid, 0) == 0
+    print("window-test\tclosed=\(first.isClosed) reopened=\(second !== first) "
+          + "shellAlive=\(alive) ranCommand=\(ran)")
+
+    first.terminal.terminate()
+    second.terminal.terminate()
+    return ran && alive
+}
+
 private func pad(_ text: String, _ width: Int, right: Bool = false) -> String {
     let filler = String(repeating: " ", count: max(0, width - text.count))
     return right ? filler + text : text + filler
@@ -236,25 +298,28 @@ if CommandLine.arguments.contains("--resize-test") {
     exit(0)
 }
 
-// MARK: - Application
-
-// The shell is spawned *first*, before AppKit is initialised. `forkpty` forks,
-// and forking a process that already has AppKit's threads and Mach ports running
-// is undefined behaviour (ADR-0002). The PTY is opened at a default size and
-// corrected with TIOCSWINSZ once the window exists.
-let terminal: Terminal
-do {
-    terminal = try Terminal(size: GridSize(rows: 24, cols: 80), shell: settings.shell.path)
-} catch {
-    FileHandle.standardError.write(Data("\(error)\n".utf8))
-    exit(1)
+// Closing the window with the red button used to be a dead end, and a dead end
+// is easy to fix and easy to break again, so the whole round trip is asserted.
+if CommandLine.arguments.contains("--window-test") {
+    exit(runWindowTest(configuration: settings) ? 0 : 1)
 }
+
+// MARK: - Application
 
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
 let controller = AppController(configuration: settings)
-controller.start(terminal: terminal)
+// Held here as well as by AppKit: `NSApplication.delegate` is a weak reference,
+// and a delegate that is deallocated takes "reopen the window" with it.
+let delegate = AppDelegate(controller: controller)
+app.delegate = delegate
+
+// The first window is made like every other one. It used to be a special case,
+// because `forkpty` had to run before AppKit was initialised (ADR-0002); with
+// `posix_spawn` (ADR-0007) there is no reason for it, and one path is one path to
+// get wrong.
+controller.start()
 
 app.activate(ignoringOtherApps: true)
 app.run()

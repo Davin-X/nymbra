@@ -22,7 +22,8 @@ $ otool -L .build/release/Nymbra
 > scroll regions, the alternate screen, wrapping and resize. Full-screen
 > programs are exercised in CI by feeding real terminal output through the
 > parser. Settings are real, too: a JSON file, a settings window with a live
-> preview, eight palettes, and select-and-copy.
+> preview, eight palettes, and select-and-copy. So are windows: **⌘N** opens
+> another with its own shell, and closing one is not a dead end.
 >
 > It is not yet a daily driver. Missing: tabs and splits, search, mouse reporting
 > (the modes are tracked, but no bytes are sent yet), text reflow on resize, and
@@ -122,6 +123,7 @@ of its own settings file.
 | `make pty-test` | Headless proof that a login shell runs on a PTY |
 | `make screen-test` | Feed real output through the parser and dump the screen |
 | `make resize-test` | Proof that the view and the shell agree on the grid |
+| `make window-test` | Close a window and get a working shell back |
 | `make check` | Everything CI runs |
 | `make clean` | Remove build output |
 
@@ -152,7 +154,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
                 └──────┬───────┘
                        │ depends on
                 ┌──────▼───────┐
-                │    CPTY      │  forkpty() / TIOCSWINSZ — 25 lines of C
+                │    CPTY      │  openpty() + posix_spawn() / TIOCSWINSZ — the only C here
                 └──────────────┘
 ```
 

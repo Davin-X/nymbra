@@ -14,12 +14,19 @@ final class TerminalWindow: NSObject, NSWindowDelegate {
 
     private var configuration: Configuration
 
+    /// Whether the red button has been used. The window object outlives closing —
+    /// `isReleasedWhenClosed` is off, because this class owns it — so "closed" has
+    /// to be remembered rather than inferred from `window.isVisible`, which is also
+    /// false for a window that has merely been minimised.
+    private(set) var isClosed = false
+
     /// Called when the shell exits, so the application can tidy up.
     var onExit: (() -> Void)?
 
-    /// `terminal` is passed in rather than spawned here on purpose: `forkpty`
-    /// must run before AppKit is initialised (ADR-0002), so the PTY is the
-    /// caller's to create.
+    /// The terminal is passed in rather than spawned here so that the window owns
+    /// a shell it did not have to make: who starts a shell, and when, is
+    /// `AppController`'s decision, and it is the same decision for the first
+    /// window and every one after it.
     init(configuration: Configuration, terminal: Terminal) {
         self.configuration = configuration
         self.terminal = terminal
@@ -39,6 +46,9 @@ final class TerminalWindow: NSObject, NSWindowDelegate {
         window.contentView = view
         window.setContentSize(frame.size)
         window.center()
+        // The window is owned by this object (and by the application's list of
+        // windows), so closing it must not also release it.
+        window.isReleasedWhenClosed = false
 
         view.onInput = { [weak self] bytes in self?.terminal.send(bytes) }
         view.onResize = { [weak self] size in self?.terminal.resize(size) }
@@ -99,6 +109,7 @@ final class TerminalWindow: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        isClosed = true
         terminal.terminate()
     }
 }

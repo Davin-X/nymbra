@@ -8,6 +8,7 @@ import Foundation
 /// shortcut that is in force. Drift between those two is how an app ends up
 /// advertising a shortcut that does nothing.
 public enum Command: String, CaseIterable, Sendable {
+    case newWindow
     case copy
     case paste
     case selectAll
@@ -19,6 +20,7 @@ public enum Command: String, CaseIterable, Sendable {
     /// What a menu calls it.
     public var title: String {
         switch self {
+        case .newWindow: return "New Window"
         case .copy: return "Copy"
         case .paste: return "Paste"
         case .selectAll: return "Select All"
@@ -32,6 +34,7 @@ public enum Command: String, CaseIterable, Sendable {
     /// A sentence for the settings window, since "Clear Buffer" is not obvious.
     public var explanation: String {
         switch self {
+        case .newWindow: return "Open another window, with a shell of its own"
         case .copy: return "Copy the selection to the clipboard"
         case .paste: return "Paste the clipboard into the terminal"
         case .selectAll: return "Select everything on screen"
@@ -48,6 +51,7 @@ public enum Command: String, CaseIterable, Sendable {
     /// that muscle memory from other applications transfers.
     public var defaultShortcut: Shortcut? {
         switch self {
+        case .newWindow: return Shortcut(parsing: "cmd+n")
         case .copy: return Shortcut(parsing: "cmd+c")
         case .paste: return Shortcut(parsing: "cmd+v")
         case .selectAll: return Shortcut(parsing: "cmd+a")

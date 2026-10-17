@@ -22,13 +22,30 @@ final class AppController: NSObject {
     }
 
     /// Install the menu bar and put the first window up.
-    ///
-    /// The PTY is passed in because it must be spawned before AppKit starts
-    /// (ADR-0002); this is also why there is no "New Window" yet — a second
-    /// shell at runtime needs `posix_spawn` rather than `forkpty`, which is the
-    /// next milestone's work rather than a thing to get subtly wrong now.
-    func start(terminal: Terminal) {
+    func start() {
         AppMenu.install(controller: self, configuration: configuration)
+        _ = makeWindow()
+    }
+
+    /// Make a window, with a shell of its own.
+    ///
+    /// Every window owns an independent `Terminal`. That is only possible because
+    /// shells are started with `posix_spawn` rather than `forkpty` (ADR-0007):
+    /// `forkpty` forks the application, so the first window used to have to be
+    /// spawned before AppKit started — which is why there was no "New Window" to
+    /// speak of, and why closing the last window was a dead end.
+    @discardableResult
+    func makeWindow() -> TerminalWindow? {
+        discardClosedWindows()
+
+        let terminal: Terminal
+        do {
+            terminal = try Terminal(size: GridSize(rows: 24, cols: 80),
+                                    shell: configuration.shell.path)
+        } catch {
+            cannotStartShell(error)
+            return nil
+        }
 
         let window = TerminalWindow(configuration: configuration, terminal: terminal)
         window.onExit = { [weak self, weak window] in
@@ -37,6 +54,30 @@ final class AppController: NSObject {
         }
         windows.append(window)
         window.makeKeyAndOrderFront()
+        return window
+    }
+
+    /// Bring a window forward, or make one if there is none left.
+    ///
+    /// This is what a Dock click and `open` on the bundle go through. A closed
+    /// window is skipped rather than revived: its shell was terminated when it
+    /// closed, so what is behind it is a still picture, not a session.
+    @discardableResult
+    func reopenWindow() -> TerminalWindow? {
+        discardClosedWindows()
+        guard let window = windows.last else {
+            return makeWindow()
+        }
+        window.makeKeyAndOrderFront()
+        NSApp.activate(ignoringOtherApps: true)
+        return window
+    }
+
+    /// A closed window is dropped only from here — never from inside
+    /// `windowWillClose`, where releasing the last reference would deallocate a
+    /// window in the middle of closing it.
+    private func discardClosedWindows() {
+        windows.removeAll { $0.isClosed }
     }
 
     /// The window a command should act on: the key one, or the last one standing.
@@ -44,7 +85,19 @@ final class AppController: NSObject {
         if let key = NSApp.keyWindow, let match = windows.first(where: { $0.window === key }) {
             return match
         }
-        return windows.last
+        return windows.last(where: { !$0.isClosed })
+    }
+
+    /// A shell that will not start leaves the application with nothing to show, so
+    /// it is said out loud rather than written to a log nobody will read.
+    private func cannotStartShell(_ error: Error) {
+        FileHandle.standardError.write(Data("nymbra: \(error)\n".utf8))
+        let alert = NSAlert()
+        alert.messageText = "Cannot start a shell"
+        alert.informativeText = "\(error)"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func noteExit(of window: TerminalWindow) {
@@ -88,6 +141,10 @@ final class AppController: NSObject {
     // `Command.shortcut(for:overrides:)`, the same function the settings window
     // reads, so a shortcut cannot be advertised in one place and missing in the
     // other.
+
+    @objc func newWindow(_ sender: Any?) {
+        _ = makeWindow()
+    }
 
     @objc func showSettings(_ sender: Any?) {
         if settingsController == nil {

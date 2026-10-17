@@ -118,7 +118,11 @@ func shortcutSuite(_ h: Harness) {
 
     // MARK: The command list
 
-    h.equal(Command.allCases.count, 7, "there are seven commands")
+    // The count is here to make "a command was added and its tests were not" a
+    // failure rather than an oversight — so it is stated as the one place that
+    // knows, and the loop below is what actually covers every command.
+    h.equal(Command.allCases.count, 8,
+            "there are eight commands (add one, and this line, deliberately)")
     for command in Command.allCases {
         h.expect(command.defaultShortcut != nil, "\(command.rawValue) has a default shortcut")
         h.expect(!command.title.isEmpty, "\(command.rawValue) has a title")
@@ -166,7 +170,10 @@ func shortcutSuite(_ h: Harness) {
 
     let bindings = Command.bindings()
     h.equal(bindings.count, Command.allCases.count, "the bindings list covers every command")
-    h.equal(bindings.first?.command, .copy, "the bindings list is in a stable order")
+    // The order is the order of the enum, and the settings window renders the
+    // list top to bottom: a reordering is a change to what people see, so it is
+    // pinned here rather than discovered in a screenshot.
+    h.equal(bindings.first?.command, .newWindow, "the bindings list is in a stable order")
 
     // MARK: What the menu bar will be built from
     //

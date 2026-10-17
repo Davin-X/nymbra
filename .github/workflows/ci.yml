@@ -92,6 +92,26 @@ jobs:
       - name: Grid agreement
         run: .build/release/Nymbra --resize-test
 
+      # Closing the window with the red button used to leave the application
+      # running with no window and no way to make one — the only route back to a
+      # terminal was to quit. This closes a window, reopens it, and requires the
+      # new shell to run a command. No window is ever shown.
+      - name: Reopen after close
+        run: |
+          .build/release/Nymbra --window-test > window.out 2> window.err &
+          pid=$!
+          for _ in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            echo "::error::--window-test did not finish"
+          fi
+          wait "$pid" 2>/dev/null || true
+          cat window.err >&2 || true
+          cat window.out
+          grep -q "closed=true reopened=true shellAlive=true ranCommand=true" window.out \
+            || { echo "::error::a closed window did not come back with a working shell"; exit 1; }
+          echo "Reopen after close passed"
+
       - name: Docs present
         run: |
           for f in README.md LICENSE CONTRIBUTING.md CHANGELOG.md \

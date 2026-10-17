@@ -24,6 +24,7 @@ enum AppMenu {
                       configuration: Configuration) -> (main: NSMenu, window: NSMenu) {
         let main = NSMenu()
         main.addItem(applicationMenu(controller: controller, configuration: configuration))
+        main.addItem(fileMenu(controller: controller, configuration: configuration))
         main.addItem(editMenu(controller: controller, configuration: configuration))
         main.addItem(viewMenu(controller: controller, configuration: configuration))
         let window = windowMenu()
@@ -56,6 +57,22 @@ enum AppMenu {
                               key: "", modifiers: []))
         menu.addItem(.separator())
         menu.addItem(standard("Quit Nymbra", #selector(NSApplication.terminate(_:)), key: "q"))
+        return root
+    }
+
+    /// File holds what makes a window and what ends one. Both are ordinary
+    /// platform behaviour, which is the point: a terminal that cannot open a
+    /// second window is not one you can work in.
+    private static func fileMenu(controller: AppController,
+                                 configuration: Configuration) -> NSMenuItem {
+        let root = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: "File")
+        root.submenu = menu
+
+        menu.addItem(command(.newWindow, #selector(AppController.newWindow(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(.separator())
+        menu.addItem(standard("Close Window", #selector(NSWindow.performClose(_:)), key: "w"))
         return root
     }
 

@@ -1,6 +1,11 @@
 # ADR-0002 — `forkpty()` runs before AppKit starts
 
-**Status:** Accepted · 2026-10-17
+**Status:** Superseded by [ADR-0007](0007-posix-spawn-instead-of-forkpty.md) · 2026-10-17
+
+> Kept as written. This decision was right for one window and made a second
+> impossible: `forkpty()` forks the application, so no shell could be started
+> once AppKit had started. ADR-0007 replaces it with `posix_spawn`, which
+> leaves no post-fork code to constrain at all.
 
 ## Context
 
