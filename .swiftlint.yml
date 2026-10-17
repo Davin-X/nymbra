@@ -1,0 +1,56 @@
+disabled_rules:
+  - line_length
+  - type_body_length
+  - file_length
+  - large_tuple
+  - nesting
+  - cyclomatic_complexity
+  - function_parameter_count
+  - type_name
+  - identifier_name
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - implicit_return
+  - joined_default_parameter
+  - missing_docs
+  - no_fallthrough_only
+  - number_separator
+  - object_literal
+  - overridden_super_call
+  - private_action
+  - private_outlet
+  - private_subject
+  - prohibited_interface_builder
+  - quick_discouraged_call
+  - redundant_disable
+  - redundant_optional_initialization
+  - redundant_void_return
+  - required_enum_case
+  - sorted_first_last
+  - sorted_imports
+  - static_operator
+  - strong_iboutlet
+  - switch_case_on_newline
+  - toggle_bool
+  - type_cast
+  - unneeded_break_in_switch
+  - unneeded_parentheses_in_closure_argument
+  - untyped_error_in_catch
+  - vertical_parameter_alignment
+  - void_function_in_ternary
+  - xct_specific_matcher
+
+included:
+  - Sources
+
+excluded:
+  - .build
+  - .swiftpm
+  - .git
+  - .idea
+  - .vscode
+
+warning_threshold: 1
+error_threshold: 0

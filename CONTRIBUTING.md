@@ -31,9 +31,10 @@ not, that is a bug — please report it.
 | Command | Purpose |
 |---|---|
 | `make build` | Release build |
+| `make lint` | Run SwiftLint (`brew install swiftlint`) |
 | `make test` | Test harness (`NymbraCheck`) |
 | `make pty-test` | Headless proof that a login shell runs on a PTY |
-| `make check` | Everything CI runs — the gate |
+| `make check` | Everything CI runs — lint, build, tests, headless proofs |
 | `make clean` | Remove build output |
 
 ## The architecture rule

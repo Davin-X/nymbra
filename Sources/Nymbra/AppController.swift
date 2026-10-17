@@ -174,6 +174,10 @@ final class AppController: NSObject {
         _ = makeWindow()
     }
 
+    @objc func newTab(_ sender: Any?) {
+        activeWindow?.newTab()
+    }
+
     @objc func showSettings(_ sender: Any?) {
         if settingsController == nil {
             settingsController = SettingsWindowController(configuration: configuration) { [weak self] updated in

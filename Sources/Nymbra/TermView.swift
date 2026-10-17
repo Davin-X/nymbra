@@ -443,6 +443,12 @@ final class TermView: NSView {
     /// than going to the program, which is what a user expects. Mouse reporting
     /// takes precedence over this once it lands.
     override func scrollWheel(with event: NSEvent) {
+        // Mouse reporting takes precedence over scrollback scrolling: a program
+        // that asked for mouse events gets scroll-up/down buttons instead.
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
         guard !screen.scrollback.isEmpty else { return }
         if event.hasPreciseScrollingDeltas {
             scrollRemainder += event.scrollingDeltaY
@@ -483,9 +489,77 @@ final class TermView: NSView {
         onInput?(newlinesRemoved)
     }
 
+    // MARK: - Mouse reporting
+
+    /// Convert an NSEvent into xterm mouse-protocol bytes, or nil when the
+    /// event is not a mouse report (or mouse reporting is off).
+    ///
+    /// X10:   ESC [ M Cb Cx Cy        (press only; no release, no motion)
+    /// SGR:   ESC [ < Cb ; Cx ; Cy M  (M = press, m = release)
+    ///
+    /// Coordinates are 0-based grid cells; xterm adds 33 to each byte.
+    /// Button byte: low 3 bits = button (0=left,1=middle,2=right,3=release),
+    /// bit 3 = shift, bit 4 = option, bit 5 = control.
+    private func mouseReportBytes(for event: NSEvent) -> [UInt8]? {
+        guard screen.mouseMode != .off else { return nil }
+
+        let location = convert(event.locationInWindow, from: nil)
+        guard let position = cellPosition(at: location) else { return nil }
+        let cx = position.col + 33
+        let cy = position.row + 33
+
+        var button: Int
+        var pressed: Bool
+        switch event.type {
+        case .leftMouseDown:   button = 0; pressed = true
+        case .leftMouseUp:     button = 3; pressed = false
+        case .rightMouseDown:  button = 2; pressed = true
+        case .rightMouseUp:    button = 3; pressed = false
+        case .otherMouseDown:  button = 1; pressed = true
+        case .otherMouseUp:    button = 3; pressed = false
+        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            button = 3; pressed = false  // motion
+        default: return nil
+        }
+
+        var cb = button
+        if event.modifierFlags.contains(.shift)   { cb |= 0x08 }
+        if event.modifierFlags.contains(.option)  { cb |= 0x10 }
+        if event.modifierFlags.contains(.control) { cb |= 0x20 }
+
+        // Scroll wheel: buttons 4 (up) and 5 (down).
+        if event.type == .scrollWheel {
+            cb = event.scrollingDeltaY < 0 ? 4 : 5
+            pressed = true
+        }
+
+        switch screen.mouseEncoding {
+        case .x10:
+            guard pressed else { return nil }  // X10 has no release or motion
+            return [0x1B, 0x5B, 0x4D, UInt8(cb + 32), UInt8(cx), UInt8(cy)]
+        case .sgr:
+            let marker = pressed ? UInt8(ascii: "M") : UInt8(ascii: "m")
+            return [0x1B, 0x5B, 0x3C] + Array("\(cb);\(cx);\(cy)".utf8) + [marker]
+        }
+    }
+
+    /// Send a mouse report to the PTY if mouse reporting is enabled.
+    /// `isMotion` suppresses the report in `.click` mode, which has no motion.
+    private func sendMouseReport(for event: NSEvent, isMotion: Bool = false) {
+        if isMotion, screen.mouseMode == .click { return }
+        guard let bytes = mouseReportBytes(for: event) else { return }
+        onInput?(bytes)
+    }
+
     // MARK: - Selection
 
     override func mouseDown(with event: NSEvent) {
+        // Mouse reporting takes precedence over selection: when a program has
+        // asked for mouse events, they go to the PTY, not to the highlight.
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
         window?.makeFirstResponder(self)
         // Told, not asked: the window decides which pane has the keyboard, and it
         // is the one that has to draw the change.
@@ -514,7 +588,11 @@ final class TermView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         // A drag after a double-click keeps the word selected; only a plain drag
-        // starts a new selection.
+        // starts a new selection. Mouse reporting takes precedence.
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event, isMotion: true)
+            return
+        }
         guard let anchor = dragAnchor else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard let position = cellPosition(at: point) else { return }
@@ -523,7 +601,55 @@ final class TermView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        // Mouse reporting takes precedence over selection.
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
         dragAnchor = nil
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
+        // Right-click without mouse reporting does nothing by default.
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event, isMotion: true)
+            return
+        }
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event, isMotion: true)
+            return
+        }
     }
 
     /// The cell under a point, in viewport coordinates. Points outside the grid

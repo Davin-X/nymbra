@@ -160,6 +160,36 @@ final class TerminalWindow: NSObject, NSWindowDelegate {
         return true
     }
 
+    /// A new shell that fills the window: every existing pane ends, like closing
+    /// a tab and opening another. The window stays; only the shell changes.
+    @discardableResult
+    func newTab() -> Bool {
+        let id = PaneID(nextPaneID)
+        nextPaneID += 1
+
+        let pane: Pane
+        do {
+            pane = try makePane(id: id)
+        } catch {
+            onSpawnFailure?(error)
+            return false
+        }
+
+        // Every existing pane ends: this window now has one shell, full window.
+        for (_, oldPane) in panes {
+            oldPane.terminal.terminate()
+        }
+        panes.removeAll()
+
+        layout = PaneLayout(id)
+        panes[id] = pane
+        applyLayout()
+        pane.terminal.resize(pane.view.grid)
+        pane.terminal.start()
+        focus(id)
+        return true
+    }
+
     /// Take the keyboard, and show where it is: with more than one pane on screen,
     /// "where does my typing go?" has to be answerable at a glance.
     func focus(_ pane: PaneID) {

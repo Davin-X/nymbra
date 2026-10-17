@@ -76,6 +76,8 @@ enum AppMenu {
 
         menu.addItem(command(.newWindow, #selector(AppController.newWindow(_:)),
                              target: controller, configuration: configuration))
+        menu.addItem(command(.newTab, #selector(AppController.newTab(_:)),
+                             target: controller, configuration: configuration))
         menu.addItem(.separator())
         menu.addItem(command(.closePane, #selector(AppController.closePane(_:)),
                              target: controller, configuration: configuration))
