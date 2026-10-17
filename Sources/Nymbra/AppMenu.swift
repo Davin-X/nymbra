@@ -60,9 +60,14 @@ enum AppMenu {
         return root
     }
 
-    /// File holds what makes a window and what ends one. Both are ordinary
-    /// platform behaviour, which is the point: a terminal that cannot open a
-    /// second window is not one you can work in.
+    /// File holds what makes a window or a pane and what ends one. Both are
+    /// ordinary platform behaviour, which is the point: a terminal that cannot
+    /// open a second window is not one you can work in.
+    ///
+    /// ⌘W closes the focused *pane*, and the window only when it is the last
+    /// one — which is what a person means by it, and why "Close Window" here is
+    /// ⇧⌘W. The Window menu has no key equivalent for closing for the same
+    /// reason: a menu may not advertise a chord that the File menu takes first.
     private static func fileMenu(controller: AppController,
                                  configuration: Configuration) -> NSMenuItem {
         let root = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
@@ -72,7 +77,10 @@ enum AppMenu {
         menu.addItem(command(.newWindow, #selector(AppController.newWindow(_:)),
                              target: controller, configuration: configuration))
         menu.addItem(.separator())
-        menu.addItem(standard("Close Window", #selector(NSWindow.performClose(_:)), key: "w"))
+        menu.addItem(command(.closePane, #selector(AppController.closePane(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(standard("Close Window", #selector(NSWindow.performClose(_:)),
+                              key: "w", modifiers: [.command, .shift]))
         return root
     }
 
@@ -94,12 +102,26 @@ enum AppMenu {
         return root
     }
 
+    /// Panes are View's business rather than File's: they change what one window
+    /// shows, not what exists. Splitting and moving between panes belong next to
+    /// each other because they are the same thought — where the next shell goes,
+    /// and which one is listening.
     private static func viewMenu(controller: AppController,
                                  configuration: Configuration) -> NSMenuItem {
         let root = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
         let menu = NSMenu(title: "View")
         root.submenu = menu
 
+        menu.addItem(command(.splitRight, #selector(AppController.splitRight(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(command(.splitDown, #selector(AppController.splitDown(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(.separator())
+        menu.addItem(command(.focusNextPane, #selector(AppController.focusNextPane(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(command(.focusPreviousPane, #selector(AppController.focusPreviousPane(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(.separator())
         menu.addItem(command(.increaseFontSize, #selector(AppController.increaseFontSize(_:)),
                              target: controller, configuration: configuration))
         menu.addItem(command(.decreaseFontSize, #selector(AppController.decreaseFontSize(_:)),
@@ -117,7 +139,10 @@ enum AppMenu {
         menu.addItem(standard("Minimize", #selector(NSWindow.performMiniaturize(_:)), key: "m"))
         menu.addItem(standard("Zoom", #selector(NSWindow.performZoom(_:)), key: "", modifiers: []))
         menu.addItem(.separator())
-        menu.addItem(standard("Close Window", #selector(NSWindow.performClose(_:)), key: "w"))
+        // No key equivalent: ⌘W is Close Pane in the File menu, and a menu may not
+        // advertise a chord another menu takes first.
+        menu.addItem(standard("Close Window", #selector(NSWindow.performClose(_:)),
+                              key: "", modifiers: []))
         menu.addItem(.separator())
         menu.addItem(plain("Bring All to Front", #selector(NSApplication.arrangeInFront(_:)),
                            target: NSApp))

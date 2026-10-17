@@ -121,13 +121,25 @@ func shortcutSuite(_ h: Harness) {
     // The count is here to make "a command was added and its tests were not" a
     // failure rather than an oversight — so it is stated as the one place that
     // knows, and the loop below is what actually covers every command.
-    h.equal(Command.allCases.count, 8,
-            "there are eight commands (add one, and this line, deliberately)")
+    h.equal(Command.allCases.count, 13,
+            "there are thirteen commands (add one, and this line, deliberately)")
     for command in Command.allCases {
         h.expect(command.defaultShortcut != nil, "\(command.rawValue) has a default shortcut")
         h.expect(!command.title.isEmpty, "\(command.rawValue) has a title")
         h.expect(!command.explanation.isEmpty, "\(command.rawValue) explains itself")
     }
+
+    // The pane commands have to follow the platform's conventions, because muscle
+    // memory from every other terminal is the whole reason to pick these chords
+    // and not others.
+    h.equal(Command.splitRight.defaultShortcut, Shortcut(parsing: "cmd+d"),
+            "a pane splits sideways with \u{2318}D")
+    h.equal(Command.splitDown.defaultShortcut, Shortcut(parsing: "cmd+shift+d"),
+            "and downwards with \u{21E7}\u{2318}D")
+    h.equal(Command.closePane.defaultShortcut, Shortcut(parsing: "cmd+w"),
+            "the pane the keyboard is in closes with \u{2318}W")
+    h.equal(Command.focusNextPane.defaultShortcut, Shortcut(parsing: "cmd+rightbracket"),
+            "focus moves on with \u{2318}]")
 
     // Two commands sharing a shortcut would mean one of them never fires.
     var seen: [Shortcut: Command] = [:]
@@ -165,7 +177,7 @@ func shortcutSuite(_ h: Harness) {
                              modifiers: [control, shift],
                              overrides: ["copy": "ctrl+shift+y"]), .copy,
             "a rebound command fires on its new shortcut")
-    h.equal(Command.matching(keyCode: 2, charactersIgnoringModifiers: "d", modifiers: command), nil,
+    h.equal(Command.matching(keyCode: 38, charactersIgnoringModifiers: "j", modifiers: command), nil,
             "a chord that belongs to no command is not a command")
 
     let bindings = Command.bindings()

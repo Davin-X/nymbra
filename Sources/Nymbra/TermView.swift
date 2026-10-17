@@ -14,6 +14,9 @@ import NymbraInput
 final class TermView: NSView {
     var onInput: (([UInt8]) -> Void)?
     var onResize: ((GridSize) -> Void)?
+    /// A click landed here, so this pane should take the keyboard. Altitude rather
+    /// than a decision: which pane is focused is the window's to say.
+    var onFocus: (() -> Void)?
 
     private let screen: Screen
 
@@ -49,6 +52,17 @@ final class TermView: NSView {
     /// Cursor blink phase, and the timer that advances it.
     private var blinkOn = true
     private var blinkTimer: Timer?
+
+    /// Whether this pane has the keyboard. Drawn, because with more than one pane
+    /// on screen "where does my typing go?" has to be answerable at a glance: an
+    /// unfocused pane shows its cursor as an outline.
+    var isFocused = true {
+        didSet {
+            guard isFocused != oldValue else { return }
+            updateBlinkTimer()
+            needsDisplay = true
+        }
+    }
 
     /// The current selection, if any. An optional rather than an empty selection,
     /// so a plain click clears the highlight instead of leaving one cell lit.
@@ -199,14 +213,14 @@ final class TermView: NSView {
                                     blinks: configuration.behaviour.cursorBlinks)
     }
 
-    /// Blink only when the shape asks for it, the setting allows it, and the
-    /// window is focused: a blinking cursor in an unfocused window is noise.
+    /// Blink only when the shape asks for it, the setting allows it, and this pane
+    /// has the keyboard: a blinking cursor in a pane nobody is typing into is noise.
     private func updateBlinkTimer() {
         blinkTimer?.invalidate()
         blinkTimer = nil
         blinkOn = true
 
-        guard window != nil, cursorStyle.blinks, configuration.behaviour.cursorBlinks else { return }
+        guard isFocused, window != nil, cursorStyle.blinks, configuration.behaviour.cursorBlinks else { return }
         blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             guard let self, self.window?.isKeyWindow == true else { return }
             self.blinkOn.toggle()
@@ -331,6 +345,11 @@ final class TermView: NSView {
         let style = cursorStyle
         if style.blinks, !blinkOn { return }
 
+        guard isFocused else {
+            drawUnfocusedCursor(ctx, style: style)
+            return
+        }
+
         let cursor = screen.cursor
         let origin = cellOrigin(col: cursor.col, row: cursor.row)
 
@@ -358,6 +377,28 @@ final class TermView: NSView {
             ctx.textPosition = CGPoint(x: origin.x, y: baseline(row: cursor.row))
             CTLineDraw(line, ctx)
         }
+    }
+
+    /// The cursor of a pane that does not have the keyboard: the same shape, drawn
+    /// as an outline. Visible enough to say "there is a cursor here", not filled
+    /// enough to claim that typing lands here.
+    private func drawUnfocusedCursor(_ ctx: CGContext, style: Screen.CursorStyle) {
+        let cursor = screen.cursor
+        let origin = cellOrigin(col: cursor.col, row: cursor.row)
+        ctx.setStrokeColor(theme.cursor)
+        ctx.setLineWidth(1)
+
+        let rect: CGRect
+        switch style {
+        case .bar, .barBlink:
+            rect = CGRect(x: origin.x + 0.5, y: origin.y, width: 1, height: cellHeight - 1)
+        case .underline, .underlineBlink:
+            rect = CGRect(x: origin.x, y: origin.y + cellHeight - 1.5, width: cellWidth - 1, height: 1)
+        case .block, .blockBlink:
+            rect = CGRect(x: origin.x + 0.5, y: origin.y + 0.5,
+                          width: cellWidth - 1, height: cellHeight - 1)
+        }
+        ctx.stroke(rect)
     }
 
     // MARK: - Input
@@ -446,6 +487,9 @@ final class TermView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        // Told, not asked: the window decides which pane has the keyboard, and it
+        // is the one that has to draw the change.
+        onFocus?()
         let point = convert(event.locationInWindow, from: nil)
         guard let position = cellPosition(at: point) else { return }
 

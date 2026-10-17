@@ -20,6 +20,13 @@ struct Theme {
     var cursor: CGColor { Self.colour(palette.cursor) }
     var selection: CGColor { Self.colour(palette.selection) }
 
+    /// The line between panes: the background nudged toward the foreground, so it
+    /// reads as a seam in every preset — including the light ones, where a fixed
+    /// grey would read as a border — and never competes with the text.
+    var divider: CGColor {
+        Self.colour(Palette.blend(palette.background, with: palette.foreground, amount: 0.18))
+    }
+
     /// Resolve a pair of attributes to concrete colours. `nil` means "the
     /// default background", which lets a run with no background skip its
     /// rectangle entirely.
