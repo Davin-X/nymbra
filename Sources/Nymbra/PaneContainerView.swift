@@ -67,6 +67,16 @@ final class PaneContainerView: NSView {
         }
     }
 
+    /// A frame change is a layout change, and `layout()` is the one that places
+    /// the panes — so this is the hook that keeps the views and their shells
+    /// agreeing when the window is resized or the tab strip takes its share of the
+    /// height. Without it the panes keep the frames they were first given and the
+    /// shells are never told, which is a terminal that renders at the wrong size.
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        layout()
+    }
+
     private var containerSize: (width: Double, height: Double) {
         (width: Double(bounds.width), height: Double(bounds.height))
     }

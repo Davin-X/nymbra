@@ -3,7 +3,7 @@
 # asking *inside* a recipe can race the build that just finished.
 bin = $(shell swift build -c release --show-bin-path 2>/dev/null)
 
-.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test check clean
+.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test tabs-test check clean
 
 help:
 	@echo "make build       - release build"
@@ -18,6 +18,7 @@ help:
 	@echo "make screen-test - assertions against real shell output, fed through the parser"
 	@echo "make resize-test - proof that the view and the shell agree on the grid"
 	@echo "make window-test - close a window, get a working one back"
+	@echo "make tabs-test   - make, switch and close tabs without a window"
 	@echo "make check       - everything CI runs (build + tests + headless proofs)"
 	@echo "make clean       - remove build output"
 
@@ -74,7 +75,10 @@ resize-test: build
 window-test: build
 	"$(bin)/Nymbra" --window-test
 
-check: lint test pty-test screen-test resize-test window-test
+tabs-test: build
+	"$(bin)/Nymbra" --tabs-test
+
+check: lint test pty-test screen-test resize-test window-test tabs-test
 
 clean:
 	swift package clean
