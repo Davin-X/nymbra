@@ -9,6 +9,11 @@ import Foundation
 /// advertising a shortcut that does nothing.
 public enum Command: String, CaseIterable, Sendable {
     case newWindow
+    case splitRight
+    case splitDown
+    case closePane
+    case focusNextPane
+    case focusPreviousPane
     case copy
     case paste
     case selectAll
@@ -21,6 +26,11 @@ public enum Command: String, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .newWindow: return "New Window"
+        case .splitRight: return "Split Right"
+        case .splitDown: return "Split Down"
+        case .closePane: return "Close Pane"
+        case .focusNextPane: return "Focus Next Pane"
+        case .focusPreviousPane: return "Focus Previous Pane"
         case .copy: return "Copy"
         case .paste: return "Paste"
         case .selectAll: return "Select All"
@@ -35,6 +45,11 @@ public enum Command: String, CaseIterable, Sendable {
     public var explanation: String {
         switch self {
         case .newWindow: return "Open another window, with a shell of its own"
+        case .splitRight: return "Put a new shell beside this one"
+        case .splitDown: return "Put a new shell below this one"
+        case .closePane: return "Close the pane with the keyboard; the window, if it is the last one"
+        case .focusNextPane: return "Move the keyboard to the next pane"
+        case .focusPreviousPane: return "Move the keyboard to the previous pane"
         case .copy: return "Copy the selection to the clipboard"
         case .paste: return "Paste the clipboard into the terminal"
         case .selectAll: return "Select everything on screen"
@@ -52,6 +67,11 @@ public enum Command: String, CaseIterable, Sendable {
     public var defaultShortcut: Shortcut? {
         switch self {
         case .newWindow: return Shortcut(parsing: "cmd+n")
+        case .splitRight: return Shortcut(parsing: "cmd+d")
+        case .splitDown: return Shortcut(parsing: "cmd+shift+d")
+        case .closePane: return Shortcut(parsing: "cmd+w")
+        case .focusNextPane: return Shortcut(parsing: "cmd+rightbracket")
+        case .focusPreviousPane: return Shortcut(parsing: "cmd+leftbracket")
         case .copy: return Shortcut(parsing: "cmd+c")
         case .paste: return Shortcut(parsing: "cmd+v")
         case .selectAll: return Shortcut(parsing: "cmd+a")

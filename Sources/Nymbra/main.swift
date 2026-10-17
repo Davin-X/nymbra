@@ -217,25 +217,188 @@ func runWindowTest(configuration: Configuration) -> Bool { // swiftlint:disable:
 
     // The shell in the new window has to be a live process, not a corpse with a
     // prompt already drawn on it. `$((6*7))` only exists as 42 if it ran.
-    second.terminal.send("echo NYMBRA_REOPEN_$((6*7))\n")
+    let shell = second.panes[second.focusedPane]!.terminal
+    shell.send("echo NYMBRA_REOPEN_$((6*7))\n")
     let deadline = Date().addingTimeInterval(5)
     var screen = ""
     while Date() < deadline {
         // The screen is only ever touched on the main queue, so the run loop has
         // to turn for the output to arrive.
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        screen = second.terminal.screen.dump()
+        screen = shell.screen.dump()
         if screen.contains("NYMBRA_REOPEN_42") { break }
     }
 
     let ran = screen.contains("NYMBRA_REOPEN_42")
-    let alive = kill(second.terminal.pid, 0) == 0
+    let alive = kill(shell.pid, 0) == 0
     print("window-test\tclosed=\(first.isClosed) reopened=\(second !== first) "
           + "shellAlive=\(alive) ranCommand=\(ran)")
 
-    first.terminal.terminate()
-    second.terminal.terminate()
+    for pane in first.panes.values { pane.terminal.terminate() }
+    for pane in second.panes.values { pane.terminal.terminate() }
     return ran && alive
+}
+
+/// Four panes, four shells, and nothing shared between them.
+///
+/// This is the milestone's acceptance criterion, asserted headlessly. Every part
+/// of it is invisible on screen: a pane drawn at the window's size looks correct
+/// until its output wraps, two panes sharing a screen model look correct until
+/// both print at once, and a pane closed without handing its space back leaves a
+/// seam nobody notices.
+///
+/// The shells are real, and each is asked a question whose answer can only be in
+/// its own pane.
+func runSplitTest(configuration: Configuration) -> Bool { // swiftlint:disable:this function_body_length
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+
+    // The same reasoning as `--window-test`: a modal question in a headless
+    // process is a hang, not a failure.
+    var quiet = configuration
+    quiet.behaviour.confirmBeforeClosingRunningSession = false
+
+    let window: TerminalWindow
+    do {
+        window = try TerminalWindow(configuration: quiet)
+    } catch {
+        print("split-test\tFAIL: no window: \(error)")
+        return false
+    }
+    window.onSpawnFailure = { error in print("split-test\tspawn failed: \(error)") }
+
+    let containerSize = (width: Double(window.container.bounds.width),
+                         height: Double(window.container.bounds.height))
+
+    // What one pane of this window is told before there are four of them: the
+    // size every pane's size has to be smaller than, or the shells are being told
+    // about the window and not about their own quarters.
+    let firstID = window.focusedPane
+    let wholeWindowGrid = window.panes[firstID]!.view.grid
+
+    // The shape `PaneLayoutSuite` asserts in arithmetic: side by side, then each
+    // half stacked. Split the focused pane each time, which is what ⌘D does.
+    guard window.split(.sideBySide), window.split(.stacked) else {
+        print("split-test\tFAIL: a split did not happen")
+        return false
+    }
+    window.focus(firstID)
+    guard window.split(.stacked) else {
+        print("split-test\tFAIL: the fourth pane did not happen")
+        return false
+    }
+
+    let ids = window.layout.panes
+    guard ids.count == 4 else {
+        print("split-test\tFAIL: expected four panes, found \(ids.count)")
+        return false
+    }
+
+    // 1. The views are where the layout says they are, and every shell is told the
+    //    size of its own pane.
+    let placed = Dictionary(uniqueKeysWithValues:
+        window.container.placedPanes.map { ($0.pane, $0.frame) })
+    var placedExactly = true
+    for id in ids {
+        guard let pane = window.panes[id], let frame = placed[id] else {
+            placedExactly = false
+            continue
+        }
+        let expected = NSRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height)
+        if pane.view.frame != expected { placedExactly = false }
+    }
+
+    let grids = ids.map { window.panes[$0]!.view.grid }
+    let quarterSized = grids.allSatisfy {
+        $0.cols < wholeWindowGrid.cols && $0.rows < wholeWindowGrid.rows
+    }
+    let sameGrid = grids.dropFirst().allSatisfy { $0 == grids[0] }
+
+    // 2. Four shells, four screen models. Each is asked to print a marker only it
+    //    can produce, and each may show its own and nobody else's.
+    for (index, id) in ids.enumerated() {
+        window.panes[id]!.terminal.send("echo NYMBRA_PANE_\(index)_OK\n")
+    }
+
+    func ownMarkerOnly() -> Bool {
+        ids.enumerated().allSatisfy { index, id in
+            let dump = window.panes[id]!.terminal.screen.dump()
+            guard dump.contains("NYMBRA_PANE_\(index)_OK") else { return false }
+            return !ids.enumerated().contains { other, _ in
+                other != index && dump.contains("NYMBRA_PANE_\(other)_OK")
+            }
+        }
+    }
+
+    // 3. One pane runs a program, and only that pane knows it: job control is per
+    //    terminal, which a shared one could not be.
+    let busy = ids[3]
+    let idle = ids[0]
+    window.panes[busy]!.terminal.send("sleep 30\n")
+
+    let deadline = Date().addingTimeInterval(10)
+    var independent = false
+    var jobIsolated = false
+    while Date() < deadline {
+        // The screen is only ever touched on the main queue, so the run loop has
+        // to turn for any of this to arrive.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        independent = ownMarkerOnly()
+        jobIsolated = window.panes[busy]!.terminal.hasForegroundJob
+            && !window.panes[idle]!.terminal.hasForegroundJob
+        if independent && jobIsolated { break }
+    }
+    window.panes[busy]!.terminal.send([0x03])  // Ctrl+C, so nothing is left running
+
+    // 4. A divider drag reaches the shells: a pane that changed width is a pane
+    //    whose shell was told about it.
+    let left = ids[0]
+    let right = ids[2]
+    var dragReachedTheShells = false
+    if let divider = window.layout.divider(nearX: containerSize.width / 2, y: 40,
+                                           in: containerSize) {
+        let leftBefore = window.panes[left]!.view.grid.cols
+        let rightBefore = window.panes[right]!.view.grid.cols
+        window.moveDivider(divider, to: 200)
+        let leftAfter = window.panes[left]!.view.grid.cols
+        let rightAfter = window.panes[right]!.view.grid.cols
+        dragReachedTheShells = leftAfter < leftBefore && rightAfter > rightBefore
+    }
+
+    // 5. Closing one pane leaves the others exactly as they were: the same
+    //    shells, still holding their own output. A window that lost a pane must
+    //    not have disturbed the sessions in it.
+    let closing = ids[3]
+    let sibling = ids[2]
+    let survivors = ids.filter { $0 != closing }
+    let pidsBefore = survivors.map { window.panes[$0]!.terminal.pid }
+    let siblingHeightBefore = window.panes[sibling]!.view.frame.height
+
+    window.focus(closing)
+    let closed = window.close(closing)
+
+    let remaining = window.layout.panes
+    let closedIndependently = closed && remaining.count == 3 && !remaining.contains(closing)
+    let sameShells = remaining.map { window.panes[$0]!.terminal.pid } == pidsBefore
+    let spaceReturned = window.panes[sibling]!.view.frame.height > siblingHeightBefore
+    let markersHeld = ids.enumerated().allSatisfy { index, id in
+        !remaining.contains(id)
+            || window.panes[id]!.terminal.screen.dump().contains("NYMBRA_PANE_\(index)_OK")
+    }
+
+    print("split-test\tpanes=\(ids.count) placed=\(placedExactly ? 1 : 0) "
+          + "quarterGrids=\(quarterSized && sameGrid ? 1 : 0) "
+          + "independent=\(independent ? 1 : 0) jobControl=\(jobIsolated ? 1 : 0) "
+          + "divider=\(dragReachedTheShells ? 1 : 0) closed=\(remaining.count) "
+          + "sameShells=\(sameShells ? 1 : 0) spaceReturned=\(spaceReturned ? 1 : 0) "
+          + "markersHeld=\(markersHeld ? 1 : 0)")
+
+    // Left to the process exiting, but terminated explicitly so a failure below
+    // does not leave four shells behind on a test runner.
+    for pane in window.panes.values { pane.terminal.terminate() }
+    return placedExactly && quarterSized && sameGrid && independent && jobIsolated
+        && dragReachedTheShells && closedIndependently && sameShells && spaceReturned
+        && markersHeld
 }
 
 private func pad(_ text: String, _ width: Int, right: Bool = false) -> String {
@@ -302,6 +465,12 @@ if CommandLine.arguments.contains("--resize-test") {
 // is easy to fix and easy to break again, so the whole round trip is asserted.
 if CommandLine.arguments.contains("--window-test") {
     exit(runWindowTest(configuration: settings) ? 0 : 1)
+}
+
+// Splits, asserted the way the milestone is written: four panes, four shells,
+// resized and closed independently. Nothing is shown; four real shells run.
+if CommandLine.arguments.contains("--split-test") {
+    exit(runSplitTest(configuration: settings) ? 0 : 1)
 }
 
 // MARK: - Application
