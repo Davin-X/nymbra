@@ -22,7 +22,7 @@ $ otool -L .build/release/Nymbra
 > scroll regions, the alternate screen, wrapping and resize. Full-screen
 > programs are exercised in CI by feeding real terminal output through the
 > parser. Settings are real, too: a JSON file, a settings window with a live
-> preview, three palettes, and select-and-copy.
+> preview, eight palettes, and select-and-copy.
 >
 > It is not yet a daily driver. Missing: tabs and splits, search, mouse reporting
 > (the modes are tracked, but no bytes are sent yet), text reflow on resize, and
@@ -93,6 +93,16 @@ Settings live in one hand-editable JSON file:
 ```
 ~/Library/Application Support/Nymbra/config.json
 ```
+
+Eight palettes ship with it: **Dark**, **Ember** (warm dark), **Fern** (green
+dark), **Violet** (purple dark), **Light**, **Paper** (warm light), **Dawn**
+(soft light) and **High contrast**. They are not recolours of one table — each
+has its own hues and its own saturation — but they share one rule, and it is a
+tested one rather than a preference: **every colour clears WCAG AA (4.5:1)
+against the background it is drawn on**. The traditional xterm palette puts blue
+at `#0000EE`, which is 2:1 on a dark page, and `ls` colours directories exactly
+that blue. Any colour a *program* chooses that falls below the bar is lifted
+until it clears it, unless it asked for conceal or faint.
 
 Set `$NYMBRA_CONFIG` to point somewhere else — that is how the tests and CI run
 without touching your settings. Loading is deliberately total: a missing file is

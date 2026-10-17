@@ -108,7 +108,7 @@ The milestone that makes this a terminal rather than a demo.
   Headless CI covers clear, SGR, the alternate screen, wrapping and wide
   characters.
 
-**Evidence:** 687 checks pass; `--resize-test` proves the shell and the view
+**Evidence:** 952 checks pass; `--resize-test` proves the shell and the view
 agree on the grid; `Scripts/emulation-checks.sh` drives real shell output through
 the parser, and CI asserts the result without a window.
 
@@ -149,7 +149,7 @@ twice.
   Behaviour, Keyboard and Shell, and a **live preview** that draws with the same
   `Theme` and palette the terminal does. Changes apply to the open terminal as
   they are made; saving is debounced.
-- `Palette` in the UI-free core: three presets, per-colour overrides, WCAG
+- `Palette` in the UI-free core: eight presets, per-colour overrides, WCAG
   contrast arithmetic and the xterm 256-colour table. Only the `CGColor`
   conversion lives in the app (`Theme`).
 - `Selection`: click, double-click, triple-click and drag, with the text
@@ -164,7 +164,7 @@ twice.
 | Setting | Detail |
 |---|---|
 | Appearance | Preset, font family and size, with a live preview |
-| Colours | Presets — dark, light, high contrast — plus per-colour overrides |
+| Colours | Presets — dark (Dark, Ember, Fern, Violet), light (Light, Paper, Dawn), High contrast — plus per-colour overrides |
 | Behaviour | Cursor style and blink, scrollback size, confirm before closing a session that is still running |
 | Keyboard | The default shortcuts, shown in full, and every one of them remappable |
 | Shell | The default shell, read from `/etc/shells`, defaulting to `$SHELL` |
@@ -305,6 +305,7 @@ Priority: **P0** required for v0.1 · **P1** v0.1 if cheap · **P2** later.
 | Splits (horizontal/vertical) | P0 | M1.x |
 | Settings window with live preview | P1 | ✅ M2 |
 | Theme presets: dark, light, high contrast | P1 | ✅ M2 |
+| Theme presets: ember, fern, violet, paper, dawn | P1 | ✅ M2 |
 | Font family and size, with a preview | P1 | ✅ M2 |
 | Cursor style and blink | P1 | ✅ M2 |
 | Scrollback size | P1 | ✅ M2 |

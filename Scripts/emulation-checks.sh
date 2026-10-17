@@ -24,6 +24,11 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 BINARY=".build/release/Nymbra"
+# Falls back to asking SwiftPM, because `.build/release` is a symlink it
+# maintains rather than a promise.
+if [ ! -x "$BINARY" ]; then
+  BINARY="$(swift build -c release --show-bin-path)/Nymbra"
+fi
 if [ ! -x "$BINARY" ]; then
   echo "emulation checks: build first (make build)" >&2
   exit 1
@@ -159,13 +164,28 @@ theme_output=$("$BINARY" --theme-test 2>/dev/null)
 
 # One verdict line per preset, and none of them UNREADABLE: if a colour were
 # still below the bar after the readability rule, `--theme-test` would say so.
+# The expected number of presets is counted from the output rather than written
+# here, so adding a preset does not mean editing this script.
 verdicts=$(printf '%s\n' "$theme_output" | grep '^  worst ')
 readable_verdicts=$(printf '%s\n' "$verdicts" | grep -c 'readable' || true)
-if [ "$readable_verdicts" -ge 3 ] && ! printf '%s\n' "$theme_output" | grep -q 'UNREADABLE'; then
-  echo "  ok    every preset is legible ($readable_verdicts presets, no colour unreadable)"
+preset_count=$(printf '%s\n' "$theme_output" | grep -c '^[A-Za-z]* background ' || true)
+if [ "$preset_count" -ge 3 ] && [ "$readable_verdicts" -ge "$preset_count" ] \
+   && ! printf '%s\n' "$theme_output" | grep -q 'UNREADABLE'; then
+  echo "  ok    every preset is legible ($readable_verdicts of $preset_count presets, no colour unreadable)"
 else
-  echo "  FAIL  every preset is legible ($readable_verdicts of 3, see the table below)" >&2
+  echo "  FAIL  every preset is legible ($readable_verdicts of ${preset_count:-?}, see the table below)" >&2
   printf '%s\n' "$theme_output" >&2
+  failures=$((failures + 1))
+fi
+
+# The same promise for every preset, not just the dark one: the swatch in the
+# settings window has to be the colour that is actually drawn, so a preset whose
+# blue needs lifting at drawing time is a preset that is lying about itself.
+lifted_blues=$(printf '%s\n' "$theme_output" | grep '^  blue ' | grep -c 'lifted' || true)
+if [ "$lifted_blues" -eq 0 ]; then
+  echo "  ok    no preset's blue is rescued at drawing time"
+else
+  echo "  FAIL  $lifted_blues preset(s) ship a blue that has to be lifted" >&2
   failures=$((failures + 1))
 fi
 

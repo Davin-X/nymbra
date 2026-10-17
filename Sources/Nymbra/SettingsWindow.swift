@@ -601,6 +601,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             .sorted { $0.command < $1.command }
     }
 
+    /// The colour preset names as the popup shows them — a fact no test runner
+    /// can see otherwise, and one that has to keep up with the enum.
+    var presetTitles: [String] { presetPopup.itemTitles }
+
     /// What the appearance controls loaded: preset, font, size, and how many
     /// shells `/etc/shells` offered.
     var appearanceSummary: String {
@@ -609,7 +613,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         return "preset=\(preset) font=\(fontPopup.titleOfSelectedItem ?? "?") "
             + "size=\(fontSizeField.stringValue) "
             + "cursor=\(cursorPopup.titleOfSelectedItem ?? "?") "
-            + "colours=\(colourWells.count) shells=\(shellPopup.numberOfItems)"
+            + "colours=\(colourWells.count) shells=\(shellPopup.numberOfItems) "
+            + "presets=\(presetPopup.itemTitles.count)"
     }
 
     // MARK: - Conversions
@@ -617,7 +622,12 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private static func title(_ preset: Configuration.Colours.Preset) -> String {
         switch preset {
         case .dark: return "Dark"
+        case .ember: return "Ember (warm dark)"
+        case .fern: return "Fern (green dark)"
+        case .violet: return "Violet (purple dark)"
         case .light: return "Light"
+        case .paper: return "Paper (warm light)"
+        case .dawn: return "Dawn (soft light)"
         case .highContrast: return "High contrast"
         }
     }

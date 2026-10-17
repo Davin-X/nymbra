@@ -9,7 +9,10 @@ import NymbraCore
 func paletteSuite(_ h: Harness) {
     h.suite("palette")
 
-    let presets: [Configuration.Colours.Preset] = [.dark, .light, .highContrast]
+    // Every preset, including any added later: the readability promise is a
+    // property of all of them, and a list written out by hand is a promise that
+    // expires the moment somebody adds a preset.
+    let presets = Configuration.Colours.Preset.allCases
 
     // MARK: Structure
 

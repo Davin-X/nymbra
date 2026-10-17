@@ -1,3 +1,8 @@
+# Where SwiftPM put the products, asked for at parse time rather than assumed:
+# `.build/release` is a symlink SwiftPM maintains and it is not always there, and
+# asking *inside* a recipe can race the build that just finished.
+bin = $(shell swift build -c release --show-bin-path 2>/dev/null)
+
 .PHONY: help build test run app launch install dist pty-test screen-test resize-test check clean
 
 help:
@@ -21,7 +26,7 @@ test:
 	swift run -c release NymbraCheck
 
 run: build
-	.build/release/Nymbra
+	"$(bin)/Nymbra"
 
 app:
 	@Scripts/make-app.sh
@@ -48,13 +53,13 @@ dist: app
 	@echo "dist: build/Nymbra.zip ($$(du -h build/Nymbra.zip | cut -f1))"
 
 pty-test: build
-	.build/release/Nymbra --pty-test
+	"$(bin)/Nymbra" --pty-test
 
 screen-test: build
 	@Scripts/emulation-checks.sh
 
 resize-test: build
-	.build/release/Nymbra --resize-test
+	"$(bin)/Nymbra" --resize-test
 
 check: test pty-test screen-test resize-test
 

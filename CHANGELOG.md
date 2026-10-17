@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — five more colour presets, and a rule that produced them
+
+Three presets was a demo of the colour system rather than a choice. There are now
+eight, each with its own hues and saturation rather than the same table with a
+different background:
+
+| | | |
+|---|---|---|
+| **Ember** | warm dark | a lamp-lit room, hues pulled toward orange, so green reads olive |
+| **Fern** | green dark | for code that is mostly trees; saturated greens and yellows |
+| **Violet** | purple dark | the dark preset with its blues pushed toward violet |
+| **Paper** | warm light | a page rather than a screen, at noon |
+| **Dawn** | soft light | warm off-white, easier than pure white in a bright room |
+
+They were computed rather than eyeballed. `readable` guarantees a floor; a preset
+that has to *use* it is a preset that lies about itself in the settings swatches.
+So each colour was solved for the dimmest value that clears 4.5:1 on its own
+background, giving up saturation only when a saturated hue could not reach the
+bar at any brightness — which is exactly what happens to a saturated blue on a
+dark page, and is why the fallback exists. Foregrounds land at 14–16:1 and the
+worst ANSI colour in any preset is 4.62:1.
+
+- `PaletteSuite` now iterates `Preset.allCases`, so a preset added later is
+  covered by the readability, 16-colour and override assertions automatically
+  rather than needing to be added to a list.
+- `Scripts/emulation-checks.sh` counts the presets in `--theme-test`'s own output
+  instead of expecting three, and asserts that no preset ships a blue that has to
+  be rescued at drawing time — generalising what used to be a dark-only check.
+- `--settings-test` prints the preset popup's titles, so the names the user
+  actually sees are assertable without a window.
+- All five are original: own names, own values, nothing taken from another
+  terminal's theme.
+
 ### Added — a real application bundle, and an icon
 
 Nymbra could only be run as a bare executable, which meant a generic icon in the
@@ -57,7 +90,8 @@ Dock, nothing to drag to `/Applications`, and nothing to hand to another person.
   and Shell, and a **live preview** drawn with the same `Theme` and palette the
   terminal uses. Changes apply to the open terminal as they are made; the file
   write is debounced, so dragging a stepper does not write per pixel.
-- `Palette` in the core: three presets (dark, light, high contrast), per-colour
+- `Palette` in the core: three presets (dark, light, high contrast) at first,
+  eight now, plus per-colour
   overrides, WCAG contrast arithmetic, and the xterm 256-colour table. Only the
   `CGColor` conversion lives in the app, in `Theme`.
 - `Selection`: click, double-click, triple-click and drag, with text extraction
@@ -70,7 +104,7 @@ Dock, nothing to drag to `/Applications`, and nothing to hand to another person.
   text for the same reason `--screen-test` exists: CI cannot look at a window.
 - The settings window's Reset shows **what will change**, as a diff, rather than
   silently wiping.
-- 687 checks, up from 246: palette, selection, shortcut, PTY and grid suites,
+- 952 checks, up from 246: palette, selection, shortcut, PTY and grid suites,
   plus the existing configuration suite and its sixteen hostile files.
 
 ### Fixed — `ls` appeared to hide filenames

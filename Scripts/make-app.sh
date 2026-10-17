@@ -24,11 +24,21 @@ BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
 echo "app: building the release binary"
 swift build -c release --package-path "$ROOT" >/dev/null
 
+# `--show-bin-path` rather than a fixed `.build/release/Nymbra`: that path is a
+# symlink SwiftPM maintains, and it is not always there. Checked rather than
+# trusted, because a missing binary would otherwise make a bundle that fails only
+# when somebody else opens it.
+BIN_DIR="$(swift build -c release --package-path "$ROOT" --show-bin-path)"
+if [ ! -x "$BIN_DIR/Nymbra" ]; then
+  echo "app: no binary at $BIN_DIR/Nymbra" >&2
+  exit 1
+fi
+
 echo "app: assembling $APP"
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
-cp "$ROOT/.build/release/Nymbra" "$CONTENTS/MacOS/Nymbra"
+cp "$BIN_DIR/Nymbra" "$CONTENTS/MacOS/Nymbra"
 chmod +x "$CONTENTS/MacOS/Nymbra"
 
 # The icon is drawn rather than stored as a binary: reviewable, reproducible, and

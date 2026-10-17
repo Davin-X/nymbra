@@ -118,6 +118,7 @@ func runSettingsTest(configuration: Configuration) {
     let controller = SettingsWindowController(configuration: configuration) { _ in }
     print("tabs\t" + controller.tabTitles.joined(separator: ","))
     print("appearance\t" + controller.appearanceSummary)
+    print("presets\t" + controller.presetTitles.joined(separator: ","))
     for binding in controller.shortcutBindings {
         print("shortcut\t\(binding.command)\t\(binding.shortcut)")
     }

@@ -51,7 +51,11 @@ public struct Configuration: Codable, Equatable, Sendable {
     public struct Colours: Codable, Equatable, Sendable {
 
         public enum Preset: String, Codable, CaseIterable, Sendable {
-            case dark, light, highContrast
+            // Grouped the way the popup reads: the dark pages, then the light
+            // ones, then the one that is about contrast rather than taste.
+            case dark, ember, fern, violet
+            case light, paper, dawn
+            case highContrast
         }
 
         /// The colours a user may override by name. One list, held in `Palette`,
