@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nymbra}",
+            "name": "Debug Nymbra",
+            "target": "Nymbra",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Nymbra"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nymbra}",
+            "name": "Release Nymbra",
+            "target": "Nymbra",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Nymbra"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nymbra}",
+            "name": "Debug NymbraCheck",
+            "target": "NymbraCheck",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug NymbraCheck"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nymbra}",
+            "name": "Release NymbraCheck",
+            "target": "NymbraCheck",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release NymbraCheck"
+        }
+    ]
+}

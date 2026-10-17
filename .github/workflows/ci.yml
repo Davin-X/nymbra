@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: build, test, architecture
+    runs-on: macos-14
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          swift --version
+          xcode-select -p
+
+      - name: Architecture guard
+        run: |
+          chmod +x Scripts/check-architecture.sh
+          ./Scripts/check-architecture.sh
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Test
+        run: swift run -c release NymbraCheck
+
+      - name: PTY smoke test
+        run: |
+          .build/release/Nymbra --pty-test > pty.out || true
+          grep -q "PTY_OK" pty.out
+          grep -q "TERM=xterm-256color" pty.out
+          echo "PTY smoke test passed"
+
+      - name: Docs present
+        run: |
+          for f in README.md LICENSE CONTRIBUTING.md CHANGELOG.md \
+                   docs/ARCHITECTURE.md docs/ROADMAP.md; do
+            test -s "$f" || { echo "missing or empty: $f"; exit 1; }
+          done
+          echo "docs OK"

@@ -1,0 +1,11 @@
+# build output
+.build/
+*.o
+*.dSYM/
+
+# app bundles, once we produce them
+Nymbra.app
+*.dmg
+
+# macOS
+.DS_Store
