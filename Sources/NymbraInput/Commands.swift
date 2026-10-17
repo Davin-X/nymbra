@@ -10,6 +10,9 @@ import Foundation
 public enum Command: String, CaseIterable, Sendable {
     case newWindow
     case newTab
+    case closeTab
+    case nextTab
+    case previousTab
     case splitRight
     case splitDown
     case closePane
@@ -28,6 +31,9 @@ public enum Command: String, CaseIterable, Sendable {
         switch self {
         case .newWindow: return "New Window"
         case .newTab: return "New Tab"
+        case .closeTab: return "Close Tab"
+        case .nextTab: return "Next Tab"
+        case .previousTab: return "Previous Tab"
         case .splitRight: return "Split Right"
         case .splitDown: return "Split Down"
         case .closePane: return "Close Pane"
@@ -48,6 +54,9 @@ public enum Command: String, CaseIterable, Sendable {
         switch self {
         case .newWindow: return "Open another window, with a shell of its own"
         case .newTab: return "A new shell in this window, filling it"
+        case .closeTab: return "Close the current tab"
+        case .nextTab: return "Switch to the next tab"
+        case .previousTab: return "Switch to the previous tab"
         case .splitRight: return "Put a new shell beside this one"
         case .splitDown: return "Put a new shell below this one"
         case .closePane: return "Close the pane with the keyboard; the window, if it is the last one"
@@ -71,6 +80,9 @@ public enum Command: String, CaseIterable, Sendable {
         switch self {
         case .newWindow: return Shortcut(parsing: "cmd+n")
         case .newTab: return Shortcut(parsing: "cmd+shift+t")
+        case .closeTab: return Shortcut(parsing: "cmd+shift+w")
+        case .nextTab: return Shortcut(parsing: "cmd+shift+rightbracket")
+        case .previousTab: return Shortcut(parsing: "cmd+shift+leftbracket")
         case .splitRight: return Shortcut(parsing: "cmd+d")
         case .splitDown: return Shortcut(parsing: "cmd+shift+d")
         case .closePane: return Shortcut(parsing: "cmd+w")
