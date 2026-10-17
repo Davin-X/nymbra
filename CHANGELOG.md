@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a real application bundle, and an icon
+
+Nymbra could only be run as a bare executable, which meant a generic icon in the
+Dock, nothing to drag to `/Applications`, and nothing to hand to another person.
+
+- `Scripts/make-app.sh` assembles `build/Nymbra.app`: the release binary, an
+  `Info.plist` (identifier, version, minimum macOS, category, `NSPrincipalClass`),
+  a `PkgInfo`, and the icon. It lints the plist, because a malformed one makes a
+  bundle silently unlaunchable.
+- `Scripts/make-icon.swift` **draws** the icon with CoreGraphics instead of
+  storing a binary: a rounded square in the terminal's own background colour,
+  with a prompt chevron and a block cursor. Every size is rendered from one
+  drawing, the mark grows as the canvas shrinks so 16px still reads, and
+  `iconutil` compiles the set. Nothing is committed as an opaque artifact.
+- `make app`, `make launch`, `make install` (to `/Applications`, falling back to
+  `~/Applications`) and `make dist` (a zip). The build number is the commit
+  count, so there is no second file to keep in step with the version.
+- Unsigned by design at this stage: an unsigned bundle runs where it was built,
+  and code signing plus notarisation stay in M6.
+
 ### Added — M1, VT emulation
 - `Screen`: the screen model — cursor (position, visibility, shape, deferred
   wrap), pen, scrolling region, tab stops, scrollback, alternate screen, and

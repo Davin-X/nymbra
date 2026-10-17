@@ -63,7 +63,23 @@ make build
 .build/release/Nymbra
 ```
 
-There are no binary releases yet.
+Or build a real application bundle, which is what you want if you are going to
+keep it in the Dock or hand it to somebody:
+
+```sh
+make app        # build/Nymbra.app, icon and all
+make launch     # build it and open it from Finder
+make install    # copy it to /Applications (or ~/Applications)
+make dist       # build/Nymbra.zip, ready to send
+```
+
+The icon is drawn by `Scripts/make-icon.swift` at build time rather than stored
+as a binary, so it is reviewable and reproducible — and derived from the same
+colours the terminal itself uses.
+
+The bundle is **unsigned**. It runs anywhere it was built; it will not survive a
+download from the internet without Gatekeeper objecting, which is what code
+signing and notarisation in M6 are for.
 
 ## Settings
 
@@ -90,8 +106,12 @@ of its own settings file.
 |---|---|
 | `make build` | Release build |
 | `make test` | Run the test harness |
+| `make app` | Build `Nymbra.app`, icon included |
+| `make install` | Copy the bundle to `/Applications` (or `~/Applications`) |
+| `make dist` | Zip the bundle for somebody else |
 | `make pty-test` | Headless proof that a login shell runs on a PTY |
 | `make screen-test` | Feed real output through the parser and dump the screen |
+| `make resize-test` | Proof that the view and the shell agree on the grid |
 | `make check` | Everything CI runs |
 | `make clean` | Remove build output |
 
@@ -105,6 +125,7 @@ asserted in text rather than by eye:
 | `--theme-test` | Every preset, and the contrast of every colour in it |
 | `--menu-test` | The menu bar and its key equivalents |
 | `--settings-test` | The settings window's tabs and what each control loaded |
+| `--resize-test` | The grid the view reports against the grid the shell is told |
 
 `make check` is the gate: it must pass before any change is considered done.
 See [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -144,7 +165,7 @@ Full detail, including the threading model and the invariants that must hold:
 | M3 | Metal renderer, search, reflow, mouse | planned |
 | M4 | Shell integration (OSC 133) and notifications | planned |
 | M5 | Sessions: a PTY host that outlives the window | planned |
-| M6 | Signed, notarized release and updater | planned |
+| M6 | Signed, notarized release and updater | ⏳ bundle and icon done; signing remains |
 
 Full plan, feature catalogue and acceptance criteria:
 [docs/ROADMAP.md](docs/ROADMAP.md).

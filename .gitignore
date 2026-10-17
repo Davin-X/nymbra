@@ -13,3 +13,6 @@ Nymbra.app
 
 # editors (the Swift extension and JetBrains IDEs generate these)
 .idea/
+
+# generated app bundles, icons and zips
+build/

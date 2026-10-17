@@ -11,7 +11,6 @@
 
 import AppKit
 import CoreGraphics
-import CoreServices
 import Foundation
 
 // MARK: - The drawing
@@ -43,6 +42,11 @@ private func draw(into ctx: CGContext, size: CGFloat) {
     let side = size * (1 - inset * 2)
     let origin = size * inset
 
+    // The mark is enlarged as the canvas shrinks. At 16px a faithful copy of the
+    // 1024px drawing is a smudge of dark pixels; growing the mark keeps it
+    // recognisable in the Dock, the tab bar and Spotlight.
+    let zoom: CGFloat = size <= 32 ? 1.42 : (size <= 64 ? 1.18 : 1)
+
     // The rounded square, filled with a gradient. At 16px this is most of what
     // the icon is, so it is drawn first and unfussily.
     let shape = CGPath(
@@ -68,14 +72,17 @@ private func draw(into ctx: CGContext, size: CGFloat) {
     }
     ctx.restoreGState()
 
-    // Shorthand: fractions of the rounded square, y from the top.
+    // Shorthand: fractions of the rounded square, y from the top. The zoom is
+    // applied about the centre so the composition stays balanced.
     func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-        CGPoint(x: origin + side * x, y: origin + side * (1 - y))
+        let cx = 0.5 + (x - 0.5) * zoom
+        let cy = 0.5 + (y - 0.5) * zoom
+        return CGPoint(x: origin + side * cx, y: origin + side * (1 - cy))
     }
 
     // Heavier strokes when the whole icon is a few pixels wide, because a
     // hairline that is correct at 1024 is invisible at 16.
-    let stroke = side * (size <= 64 ? 0.105 : 0.082)
+    let stroke = side * (size <= 64 ? 0.105 : 0.082) * zoom
 
     // A rounded outline just inside the edge, so the shape still reads on a
     // light background without a double edge appearing at small sizes.
@@ -136,9 +143,40 @@ private func render(size: CGFloat) -> CGImage? {
     return ctx.makeImage()
 }
 
+/// Every size in a row, on grey so that both the dark edge and the light cursor
+/// are visible against something.
+private func previewStrip() -> CGImage? {
+    let sizes: [CGFloat] = [16, 32, 64, 128, 256]
+    let gap: CGFloat = 24
+    let height: CGFloat = 300
+    let width = sizes.reduce(gap) { $0 + $1 + gap }
+
+    guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+          let ctx = CGContext(
+              data: nil, width: Int(width), height: Int(height),
+              bitsPerComponent: 8, bytesPerRow: 0, space: space,
+              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+          )
+    else { return nil }
+
+    ctx.setFillColor(CGColor(srgbRed: 0.6, green: 0.6, blue: 0.62, alpha: 1))
+    ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+    var x = gap
+    for size in sizes {
+        if let image = render(size: size) {
+            ctx.draw(image, in: CGRect(x: x, y: (height - size) / 2, width: size, height: size))
+        }
+        x += size + gap
+    }
+    return ctx.makeImage()
+}
+
 private func write(_ image: CGImage, to url: URL) throws {
+    // "public.png" rather than a deprecated `kUTTypePNG`: the identifier has been
+    // stable since long before UTI types were formalised in Swift.
     guard let destination = CGImageDestinationCreateWithURL(
-        url as CFURL, kUTTypePNG, 1, nil
+        url as CFURL, "public.png" as CFString, 1, nil
     ) else {
         throw IconError.cannotWrite(url.path)
     }
@@ -218,14 +256,15 @@ do {
         exit(1)
     }
 
-    // Optional: a PNG to look at, for a human or a screenshot test.
-    if arguments.count >= 3, let preview = render(size: 512) {
-        try write(preview, to: URL(fileURLWithPath: arguments[2]))
+    // Optional: the same mark at every size it will actually be drawn at. Whether
+    // a 16px icon still reads is not something to assume.
+    if arguments.count >= 3, let strip = previewStrip() {
+        try write(strip, to: URL(fileURLWithPath: arguments[2]))
     }
 
     try? FileManager.default.removeItem(at: staging)
-    print("icon: \(output.path) "
-          + "(\(FileManager.default.attributesOfItem(atPath: output.path)[.size] as? Int ?? 0) bytes)")
+    let bytes = (try? FileManager.default.attributesOfItem(atPath: output.path))?[.size] as? Int ?? 0
+    print("icon: \(output.path) (\(bytes) bytes)")
 } catch {
     FileHandle.standardError.write(Data("icon: \(error)\n".utf8))
     exit(1)

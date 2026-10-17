@@ -15,7 +15,7 @@ APP="$ROOT/build/Nymbra.app"
 CONTENTS="$APP/Contents"
 IDENTIFIER="io.nymbra.terminal"
 VERSION="0.1.0"
-MINIMUM_MACOS="12.0"
+MINIMUM_MACOS="11.0"
 
 # The build number is the commit count: it only ever goes up, and there is no
 # second file to keep in step with the version.
@@ -61,6 +61,11 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 PLIST
 
 printf 'APPL????' > "$CONTENTS/PkgInfo"
+
+# macOS gives every built binary a `com.apple.provenance` xattr. Left alone it
+# becomes an AppleDouble `._Nymbra` file inside any zip, which looks like junk in
+# a bundle somebody else has just unzipped.
+xattr -cr "$APP" 2>/dev/null || true
 
 # A malformed plist makes a bundle silently unlaunchable, so lint it: the check
 # costs a fraction of a second and the failure it prevents is bewildering.

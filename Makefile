@@ -43,8 +43,9 @@ install: app
 
 dist: app
 	@rm -f build/Nymbra.zip
-	@cd build && ditto -c -k --keepParent Nymbra.app Nymbra.zip
-	@echo "dist: build/Nymbra.zip"
+	@cd build && xattr -cr Nymbra.app 2>/dev/null || true
+	@cd build && ditto -c -k --keepParent --noextattr --norsrc Nymbra.app Nymbra.zip
+	@echo "dist: build/Nymbra.zip ($$(du -h build/Nymbra.zip | cut -f1))"
 
 pty-test: build
 	.build/release/Nymbra --pty-test

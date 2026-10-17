@@ -249,11 +249,18 @@ still running with its output intact.
 ### M6 — Distribution 🔜
 
 **Scope**
+- ~~An application bundle, with an icon~~ ✅ `make app`
 - Universal binary (arm64 + x86_64)
 - Codesigning, notarization, hardened runtime
 - Tauri-free updater against GitHub Releases
 - `brew install --cask nymbra`
 - `THIRD_PARTY_NOTICES` and an in-app open-source licences screen
+
+**Done so far:** `Scripts/make-app.sh` assembles `Nymbra.app` from the release
+binary with a generated `Info.plist` and an icon drawn by
+`Scripts/make-icon.swift`; `make app`, `make launch`, `make install` and
+`make dist` are wired up. What remains is everything a *downloaded* copy needs:
+a universal binary, signing, notarisation, and a DMG.
 
 **Acceptance:** a fresh Mac downloads the DMG and opens it without a Gatekeeper
 warning.
