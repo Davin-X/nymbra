@@ -241,21 +241,36 @@ enum AppMenu {
     private static func name(of key: String) -> String {
         guard key.count == 1, let scalar = key.unicodeScalars.first else { return key.uppercased() }
         switch scalar.value {
-        case 0xF700: return "\u{2191}"
-        case 0xF701: return "\u{2193}"
-        case 0xF702: return "\u{2190}"
-        case 0xF703: return "\u{2192}"
-        case 0xF704...0xF717: return "F\(scalar.value - 0xF704 + 1)"
-        case 0xF728: return "\u{2326}"
-        case 0xF729: return "\u{2196}"
-        case 0xF72B: return "\u{2198}"
-        case 0xF72C: return "\u{21DE}"
-        case 0xF72D: return "\u{21DF}"
-        case 0x0D: return "\u{21A9}"
-        case 0x09: return "\u{21E5}"
-        case 0x1B: return "\u{238B}"
-        case 0x08: return "\u{232B}"
-        case 0x20: return "Space"
+        case 0xF700:
+            return "\u{2191}"
+        case 0xF701:
+            return "\u{2193}"
+        case 0xF702:
+            return "\u{2190}"
+        case 0xF703:
+            return "\u{2192}"
+        case 0xF704...0xF717:
+            return "F\(scalar.value - 0xF704 + 1)"
+        case 0xF728:
+            return "\u{2326}"
+        case 0xF729:
+            return "\u{2196}"
+        case 0xF72B:
+            return "\u{2198}"
+        case 0xF72C:
+            return "\u{21DE}"
+        case 0xF72D:
+            return "\u{21DF}"
+        case 0x0D:
+            return "\u{21A9}"
+        case 0x09:
+            return "\u{21E5}"
+        case 0x1B:
+            return "\u{238B}"
+        case 0x08:
+            return "\u{232B}"
+        case 0x20:
+            return "Space"
         default: return key.uppercased()
         }
     }

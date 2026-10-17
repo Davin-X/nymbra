@@ -110,7 +110,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             root.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             root.topAnchor.constraint(equalTo: container.topAnchor),
             root.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            bottom.widthAnchor.constraint(equalTo: tabs.widthAnchor),
+            bottom.widthAnchor.constraint(equalTo: tabs.widthAnchor)
         ])
         return container
     }
@@ -216,7 +216,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
                 well.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
                     well.widthAnchor.constraint(equalToConstant: 60),
-                    well.heightAnchor.constraint(equalToConstant: 22),
+                    well.heightAnchor.constraint(equalToConstant: 22)
                 ])
                 colourWells[name] = well
 
@@ -621,14 +621,22 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     private static func title(_ preset: Configuration.Colours.Preset) -> String {
         switch preset {
-        case .dark: return "Dark"
-        case .ember: return "Ember (warm dark)"
-        case .fern: return "Fern (green dark)"
-        case .violet: return "Violet (purple dark)"
-        case .light: return "Light"
-        case .paper: return "Paper (warm light)"
-        case .dawn: return "Dawn (soft light)"
-        case .highContrast: return "High contrast"
+        case .dark:
+            return "Dark"
+        case .ember:
+            return "Ember (warm dark)"
+        case .fern:
+            return "Fern (green dark)"
+        case .violet:
+            return "Violet (purple dark)"
+        case .light:
+            return "Light"
+        case .paper:
+            return "Paper (warm light)"
+        case .dawn:
+            return "Dawn (soft light)"
+        case .highContrast:
+            return "High contrast"
         }
     }
 
@@ -668,6 +676,8 @@ final class PreviewView: NSView {
     private var font = Fonts.resolve(Configuration())
     private var boldFont = Fonts.bold(Fonts.resolve(Configuration()))
 
+    // swiftlint:disable:next function_body_length
+    // The preview draws a small document; the limit is for logic, not for this.
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.setFillColor(theme.background)
@@ -689,7 +699,7 @@ final class PreviewView: NSView {
              ("docs/ ", sample(.indexed(4))),
              ("highlighted", sample(.default, background: .indexed(3)))],
             [("bold ", sample(bold: true)), ("faint ", sample(faint: true)),
-             ("reverse ", sample(reverse: true))],
+             ("reverse ", sample(reverse: true))]
         ]
 
         for (index, runs) in samples.enumerated() {

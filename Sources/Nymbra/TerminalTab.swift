@@ -199,9 +199,12 @@ final class TerminalTab {
     /// What to say about them. One command and three are different sentences.
     var closeDetail: String {
         switch runningJobs.count {
-        case 0: return ""
-        case 1: return "A command is still running here. Closing ends it."
-        default: return "\(runningJobs.count) commands are still running here. Closing ends them."
+        case 0:
+            return ""
+        case 1:
+            return "A command is still running here. Closing ends it."
+        default:
+            return "\(runningJobs.count) commands are still running here. Closing ends them."
         }
     }
 
