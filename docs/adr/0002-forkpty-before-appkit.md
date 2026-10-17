@@ -35,4 +35,4 @@ child does nothing but `setenv`, `execv`, and `_exit`.
 - `posix_spawn` with `POSIX_SPAWN_SETSID`: attractive because it is thread-safe,
   but the interaction between `SETSID` ordering and the necessary controlling
   terminal (`TIOCSCTTY`) is subtle, and correctness was not worth the risk at
-  this stage. Revisit for M4, where the PTY host moves out of process.
+  this stage. Revisit for M5, where the PTY host moves out of process.

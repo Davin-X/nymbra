@@ -113,6 +113,36 @@ check_absent "the alternate screen's contents are discarded on exit" \
 check "a terminfo-driven program can clear and draw" \
       "clear; printf 'CURSES-%s\n' ok" '^CURSES-ok$'
 
+# --- configuration -----------------------------------------------------------
+
+# Settings are read from $NYMBRA_CONFIG here, so a test run never touches the
+# real settings of whoever ran it.
+config_file=$(mktemp -t nymbra-emulation-checks)
+trap 'rm -f "$config_file"' EXIT
+
+# Like check, but with a configuration file in the environment.
+check_with_config() {
+  if NYMBRA_CONFIG="$2" "$BINARY" --screen-test "$3" 2>/dev/null | grep -qE "$4"; then
+    echo "  ok    $1"
+  else
+    echo "  FAIL  $1" >&2
+    failures=$((failures + 1))
+  fi
+}
+
+# The shell setting must actually decide which shell runs. `$0` is the shell's
+# own name, and the command only prints it, so the value cannot appear in the
+# echoed command line the way a literal would.
+printf '{"shell": {"path": "/bin/sh"}}\n' > "$config_file"
+check_with_config "the shell named in the config file is the one that runs" \
+      "$config_file" 'printf "SHELL_IS=%s\n" "$0"' '^SHELL_IS=(/bin/)?sh$'
+
+# A settings file that is broken must degrade to the defaults with a warning,
+# never to a failure to start. This is the promise ADR-0006 makes.
+printf 'this is not JSON at all' > "$config_file"
+check_with_config "a broken config file does not stop the terminal" \
+      "$config_file" "printf 'SURVIVED\n'" '^SURVIVED$'
+
 if [ "$failures" -ne 0 ]; then
   echo "emulation checks: $failures failure(s)" >&2
   exit 1

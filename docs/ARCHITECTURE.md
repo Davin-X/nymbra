@@ -26,21 +26,26 @@ is a bug — fix it in the same pull request.
 |---|---|---|
 | `CPTY` | `forkpty()`, `TIOCSWINSZ`. The only C in the project. | Darwin |
 | `NymbraCore` | PTY lifecycle, VT parsing, screen model, scrollback. No UI. | Foundation, CPTY |
-| `Nymbra` | Window, input, rendering. | AppKit, CoreText, Metal, NymbraCore |
-| `NymbraCheck` | The test harness and suites. | NymbraCore |
+| `NymbraInput` | Keyboard mapping: a key press to the bytes a terminal sends. No UI. | Foundation |
+| `Nymbra` | Window, input, rendering. | AppKit, CoreText, Metal, NymbraCore, NymbraInput |
+| `NymbraCheck` | The test harness and suites. | NymbraCore, NymbraInput |
 
 ### The dependency rule
 
 ```
 Nymbra  ──▶  NymbraCore  ──▶  CPTY
+   └────▶  NymbraInput
 ```
 
 Arrows are compile-time dependencies and point one way. Enforced by
 `Scripts/check-architecture.sh`, which fails CI if any UI framework appears in
-`Sources/NymbraCore` or `Sources/CPTY`.
+`Sources/NymbraCore`, `Sources/NymbraInput` or `Sources/CPTY`.
 
 The reason is not purity: it is that the emulator is the hard part and must be
-testable in milliseconds, without launching a window or a GPU.
+testable in milliseconds, without launching a window or a GPU. `NymbraInput`
+exists for the same reason — key mapping is where "arrows and function keys
+work" is decided, and that belongs in a table with tests rather than in a
+`switch` inside a view that can only be checked by hand.
 
 ## Data flow
 
@@ -57,7 +62,7 @@ shell  ──bytes──▶  PTY master fd
                   screen model             (NymbraCore/Screen.swift)
                         │  damage
                         ▼
-                  renderer                 (Nymbra/TermView.swift — CoreText now, Metal in M2)
+                  renderer                 (Nymbra/TermView.swift — CoreText now, Metal in M3)
 ```
 
 Each stage has one job. The parser never touches a graphics context; the
@@ -116,6 +121,8 @@ ADR-0001.
 | Layer | How |
 |---|---|
 | Escape-sequence state machine | Unit tests in `NymbraCheck` |
+| Keyboard mapping | Unit tests in `NymbraCheck`; the mapping is a UI-free target |
+| Viewport and scrollback | Unit tests on `Screen.displayRows` |
 | Screen model | Unit tests, including resize and scrollback |
 | Parser conformance | Input bytes → expected cells, asserted from `NymbraCheck` |
 | PTY | `--pty-test` smoke test in CI |

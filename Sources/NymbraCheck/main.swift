@@ -6,7 +6,10 @@ import Foundation
 
 let harness = Harness()
 
+keyboardSuite(harness)
 screenSuite(harness)
+viewportSuite(harness)
 parserSuite(harness)
+configurationSuite(harness)
 
 exit(harness.report())

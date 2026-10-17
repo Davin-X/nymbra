@@ -8,9 +8,9 @@ import NymbraCore
 // emulator with real bytes and printing what the screen model made of them.
 
 /// Spawn a login shell, run one command, and print every raw byte it produced.
-func runPTYTest() {
+func runPTYTest(shell: String?) {
     do {
-        let terminal = try Terminal(rows: 24, cols: 80)
+        let terminal = try Terminal(rows: 24, cols: 80, shell: shell)
         terminal.send("echo PTY_OK; echo TERM=$TERM; tty; id -un; uname -m; exit\n")
 
         var output = [UInt8]()
@@ -35,9 +35,9 @@ func runPTYTest() {
 /// The default dump is the text a user would see. `--screen-debug` instead marks
 /// blank cells with `·` and the second half of a wide character with `→`, which
 /// is what you want when diagnosing, but which would defeat text assertions.
-func runScreenTest(_ command: String, debug: Bool) {
+func runScreenTest(_ command: String, debug: Bool, shell: String?) {
     do {
-        let terminal = try Terminal(rows: 24, cols: 80)
+        let terminal = try Terminal(rows: 24, cols: 80, shell: shell)
         terminal.send(command + "\nexit\n")
 
         var chunk = [UInt8](repeating: 0, count: 4096)
@@ -54,8 +54,20 @@ func runScreenTest(_ command: String, debug: Bool) {
     }
 }
 
+// MARK: - Configuration
+//
+// Loaded before anything else, and before the shell is spawned, because the
+// shell choice comes from it. Loading is total: a missing file is the defaults,
+// and a broken one is the defaults plus a warning (ADR-0006). A terminal must
+// not refuse to start because of its own settings file.
+let loaded = Configuration.load()
+for warning in loaded.warnings {
+    FileHandle.standardError.write(Data("nymbra: \(warning)\n".utf8))
+}
+let settings = loaded.configuration
+
 if CommandLine.arguments.contains("--pty-test") {
-    runPTYTest()
+    runPTYTest(shell: settings.shell.path)
     exit(0)
 }
 
@@ -64,7 +76,7 @@ for (flag, debug) in [("--screen-test", false), ("--screen-debug", true)] {
         let command = index + 1 < CommandLine.arguments.count
             ? CommandLine.arguments[index + 1]
             : "echo hello"
-        runScreenTest(command, debug: debug)
+        runScreenTest(command, debug: debug, shell: settings.shell.path)
         exit(0)
     }
 }
@@ -77,7 +89,7 @@ for (flag, debug) in [("--screen-test", false), ("--screen-debug", true)] {
 // corrected with TIOCSWINSZ once the window exists.
 let terminal: Terminal
 do {
-    terminal = try Terminal(rows: 24, cols: 80)
+    terminal = try Terminal(rows: 24, cols: 80, shell: settings.shell.path)
 } catch {
     FileHandle.standardError.write(Data("\(error)\n".utf8))
     exit(1)
@@ -87,7 +99,7 @@ let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
 let frame = NSRect(x: 0, y: 0, width: 1000, height: 640)
-let view = TermView(frame: frame, screen: terminal.screen)
+let view = TermView(frame: frame, screen: terminal.screen, configuration: settings)
 
 let window = NSWindow(
     contentRect: frame,

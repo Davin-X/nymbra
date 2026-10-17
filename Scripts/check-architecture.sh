@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PATTERN='^import[[:space:]]+(AppKit|SwiftUI|Metal|MetalKit|CoreText|QuartzCore)'
-violations=$(grep -rnE "$PATTERN" Sources/NymbraCore Sources/CPTY 2>/dev/null || true)
+violations=$(grep -rnE "$PATTERN" Sources/NymbraCore Sources/NymbraInput Sources/CPTY 2>/dev/null || true)
 
 if [ -n "$violations" ]; then
   echo "Architecture violation: UI framework imported by a core target."

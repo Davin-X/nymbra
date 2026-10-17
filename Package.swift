@@ -8,15 +8,20 @@ let package = Package(
         // forkpty() lives in <util.h>, which Swift cannot import directly.
         .target(name: "CPTY"),
 
-        // Everything that is not UI: PTY, screen buffer, and (soon) VT parsing.
+        // Everything that is not UI: PTY, screen model, VT parsing.
         .target(name: "NymbraCore", dependencies: ["CPTY"]),
 
+        // Keyboard-to-bytes mapping. UI-free on purpose: "arrows and function
+        // keys work" is a property of this table, not of a window, so it must be
+        // assertable headlessly.
+        .target(name: "NymbraInput"),
+
         // The app itself.
-        .executableTarget(name: "Nymbra", dependencies: ["NymbraCore"]),
+        .executableTarget(name: "Nymbra", dependencies: ["NymbraCore", "NymbraInput"]),
 
         // Zero-dependency test harness. Not a SwiftPM testTarget: XCTest and
         // swift-testing are unavailable with Command Line Tools alone.
-        .executableTarget(name: "NymbraCheck", dependencies: ["NymbraCore"]),
+        .executableTarget(name: "NymbraCheck", dependencies: ["NymbraCore", "NymbraInput"]),
     ],
     swiftLanguageModes: [.v5]
 )

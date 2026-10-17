@@ -776,7 +776,7 @@ public final class Screen {
     }
 
     /// Resize, preserving content. Text is not reflowed: a line that is cut off
-    /// is lost rather than rewrapped (see docs/ROADMAP.md — reflow is M2).
+    /// is lost rather than rewrapped (see docs/ROADMAP.md — reflow is M3).
     public func resize(rows newRows: Int, cols newCols: Int) {
         let r = max(1, newRows)
         let c = max(1, newCols)
@@ -825,15 +825,41 @@ public final class Screen {
     /// trimmed by default, which is what conformance cases want to compare.
     public func rowText(_ row: Int, trim: Bool = true) -> String {
         guard row >= 0, row < rows else { return "" }
-        var text = ""
-        for col in 0..<cols {
-            let cell = grid[offset(row, col)]
-            if cell.isWideContinuation { continue }
-            text += cell.text
-        }
+        var text = Screen.text(ofLine: Array(grid[(row * cols)..<((row + 1) * cols)]))
         if !trim { return text }
         while text.hasSuffix(" ") { text.removeLast() }
         return text
+    }
+
+    /// One row of cells as text, skipping the trailing half of wide characters.
+    /// Used to read the screen model back out — for the clipboard, and for tests
+    /// that want the text a user sees rather than the cell grid.
+    public static func text(ofLine line: [Cell]) -> String {
+        var text = ""
+        for cell in line where !cell.isWideContinuation { text += cell.text }
+        return text
+    }
+
+    /// The rows to draw, oldest first, with `scrollOffset` lines of scrollback
+    /// shown above the live screen.
+    ///
+    /// The renderer does not know scrollback exists: it draws whatever this
+    /// returns, which is what keeps history and live output on one code path and
+    /// one set of tests. `scrollOffset` is clamped, so a viewport cannot be
+    /// scrolled past the oldest line held.
+    ///
+    /// This allocates per call, which is fine for the CoreText renderer of this
+    /// milestone and is one of the things Metal replaces.
+    public func displayRows(scrollOffset: Int) -> [[Cell]] {
+        let live = (0..<rows).map { row in
+            Array(grid[(row * cols)..<((row + 1) * cols)])
+        }
+        guard scrollOffset > 0, !scrollback.isEmpty else { return live }
+
+        let back = min(scrollOffset, scrollback.count)
+        let combined = scrollback + live
+        let bottom = combined.count - back
+        return Array(combined[max(0, bottom - rows)..<bottom])
     }
 
     public func dump(trim: Bool = true) -> String {

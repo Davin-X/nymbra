@@ -422,7 +422,7 @@ public final class Parser {
         }
         // Everything is `Ps ; Pt`. We act on the title and deliberately ignore
         // the rest: no clipboard writes (OSC 52), no colour changes (OSC 4/10),
-        // no hyperlinks yet (OSC 8), no shell marks yet (OSC 133, M3).
+        // no hyperlinks yet (OSC 8), no shell marks yet (OSC 133, M4).
         guard let separator = stringBuffer.firstIndex(of: 0x3B) else { return }
         let command = String(decoding: stringBuffer[..<separator], as: UTF8.self)
         let payload = String(decoding: stringBuffer[stringBuffer.index(after: separator)...], as: UTF8.self)

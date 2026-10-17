@@ -18,7 +18,7 @@ but is extra machinery to stand up early.
 
 ## Decision
 
-Ship M1 (VT emulation) on CoreText. Replace the renderer with Metal in M2,
+Ship M1 (VT emulation) on CoreText. Replace the renderer with Metal in M3,
 behind an unchanged boundary.
 
 ## Consequences
@@ -30,7 +30,13 @@ behind an unchanged boundary.
 
 **Bad**
 - CoreText drawing must be deleted later; some effort is written off.
-- Performance will be embarrassing until M2. Acceptable: nothing is shipped yet.
+- Performance will be embarrassing until M3. Acceptable: nothing is shipped yet.
+
+**Sequencing note (added later)**
+Configuration lands before the swap, in M2 — see
+[ADR-0006](0006-configuration-as-a-validated-json-file.md). A renderer hardcoded
+to one `Theme` would have to be rewritten the moment settings arrive, so the
+renderer is written once, against configuration.
 
 **The boundary that makes this cheap**
 `TermView` is a pure function of the screen model plus cell metrics. The Metal

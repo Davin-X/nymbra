@@ -1,6 +1,7 @@
 import AppKit
 import CoreText
 import NymbraCore
+import NymbraInput
 
 /// Draws the screen model onto a character grid with CoreText, one drawn run per
 /// row, plus a background rectangle wherever the cell background is not the
@@ -8,7 +9,7 @@ import NymbraCore
 ///
 /// Cell metrics are measured from CoreText rather than assumed, so every glyph
 /// lands exactly on the grid. This renderer is deliberately simple and is the
-/// piece Metal replaces in M2 — `ARCHITECTURE.md` invariant 1 keeps it a pure
+/// piece Metal replaces in M3 — `ARCHITECTURE.md` invariant 1 keeps it a pure
 /// function of the model, which is what makes that swap cheap.
 final class TermView: NSView {
     var onInput: (([UInt8]) -> Void)?
@@ -27,9 +28,35 @@ final class TermView: NSView {
     private(set) var cols: Int
     private(set) var rows: Int
 
-    init(frame: NSRect, screen: Screen) {
+    /// Lines the viewport is scrolled up into scrollback. Zero is the live
+    /// screen.
+    private var scrollOffset = 0
+    /// Trackpad scroll deltas are fractional. Carry the remainder between events
+    /// so a slow scroll is not rounded away to nothing.
+    private var scrollRemainder: CGFloat = 0
+
+    init(frame: NSRect, screen: Screen, configuration: Configuration) {
         self.screen = screen
-        let font = CTFontCreateWithName("Menlo" as CFString, 13, nil)
+        let family = configuration.appearance.fontFamily
+        let size = CGFloat(configuration.appearance.fontSize)
+
+        // A font family that does not exist would otherwise be substituted
+        // silently and, worse, substituted with something that is not
+        // monospaced, which breaks the grid. Verify the substitution instead,
+        // and fall back to a font we know the metrics of.
+        let requested = CTFontCreateWithName(family as CFString, size, nil)
+        let resolved = CTFontCopyFamilyName(requested) as String
+
+        let font: CTFont
+        if resolved.caseInsensitiveCompare(family) == .orderedSame {
+            font = requested
+        } else {
+            FileHandle.standardError.write(
+                Data("nymbra: no font family \"\(family)\"; using Menlo\n".utf8)
+            )
+            font = CTFontCreateWithName("Menlo" as CFString, size, nil)
+        }
+
         self.font = font
         self.boldFont = CTFontCreateCopyWithSymbolicTraits(font, 0, nil, .traitBold, .traitBold) ?? font
         self.ascent = CTFontGetAscent(font)
@@ -59,6 +86,9 @@ final class TermView: NSView {
         if newCols != cols || newRows != rows {
             cols = newCols
             rows = newRows
+            // A resize invalidates the viewport: the grid moved under it.
+            scrollOffset = 0
+            scrollRemainder = 0
             onResize?(newCols, newRows)
             needsDisplay = true
         }
@@ -80,19 +110,24 @@ final class TermView: NSView {
         ctx.setFillColor(Theme.background)
         ctx.fill(bounds)
 
-        for row in 0..<screen.rows { drawRow(row, ctx) }
-        drawCursor(ctx)
+        // One path for history and live output: ask the model for the rows at
+        // the current scroll position, and draw them.
+        let lines = screen.displayRows(scrollOffset: scrollOffset)
+        for (row, line) in lines.enumerated() { drawRow(line, row: row, ctx: ctx) }
+
+        // The cursor belongs to the live screen, so it is not drawn while the
+        // viewport sits up in scrollback.
+        if scrollOffset == 0 { drawCursor(ctx) }
     }
 
-    private func drawRow(_ row: Int, _ ctx: CGContext) {
+    private func drawRow(_ line: [Cell], row: Int, ctx: CGContext) {
         var col = 0
-        while col < screen.cols {
-            let attributes = screen.cell(row: row, col: col).attributes
+        while col < line.count {
+            let attributes = line[col].attributes
             var end = col
             var text = ""
-            while end < screen.cols, screen.cell(row: row, col: end).attributes == attributes {
-                let cell = screen.cell(row: row, col: end)
-                if !cell.isWideContinuation { text += cell.text }
+            while end < line.count, line[end].attributes == attributes {
+                if !line[end].isWideContinuation { text += line[end].text }
                 end += 1
             }
             drawRun(text, col: col, width: end - col, row: row, attributes: attributes, ctx: ctx)
@@ -172,44 +207,70 @@ final class TermView: NSView {
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
+        // Command chords belong to the application: Cmd+V pastes, Cmd+C will
+        // copy.
         if flags.contains(.command) {
             if event.charactersIgnoringModifiers?.lowercased() == "v" { paste(nil) }
             return
         }
 
-        var bytes: [UInt8] = []
+        // Typing returns to the live screen, the way every terminal behaves: you
+        // cannot type into history.
+        returnToLiveScreen()
 
-        switch event.keyCode {
-        case 36, 76:  bytes = [0x0D]                          // return, keypad enter
-        case 51:      bytes = [0x7F]                          // delete
-        case 117:     bytes = Array("\u{1B}[3~".utf8)         // forward delete
-        case 48:      bytes = flags.contains(.shift) ? Array("\u{1B}[Z".utf8) : [0x09]
-        case 53:      bytes = [0x1B]                          // escape
-        case 126:     bytes = cursorKey(0x41)                 // up
-        case 125:     bytes = cursorKey(0x42)                 // down
-        case 124:     bytes = cursorKey(0x43)                 // right
-        case 123:     bytes = cursorKey(0x44)                 // left
-        case 115:     bytes = cursorKey(0x48)                 // home
-        case 119:     bytes = cursorKey(0x46)                 // end
-        case 116:     bytes = Array("\u{1B}[5~".utf8)         // page up
-        case 121:     bytes = Array("\u{1B}[6~".utf8)         // page down
-        default:
-            // Option is the meta key: send ESC before the character, which is
-            // what readline expects for M-f, M-b and friends.
-            if flags.contains(.option), let characters = event.charactersIgnoringModifiers {
-                bytes = [0x1B] + Array(characters.utf8)
-            } else if let characters = event.characters {
-                bytes = Array(characters.utf8)
-            }
-        }
-
+        // The mapping itself lives in NymbraInput, where it is asserted without
+        // a window. This method is only the AppKit boundary.
+        let bytes = Keyboard.bytes(
+            keyCode: event.keyCode,
+            characters: event.characters,
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            modifiers: Self.modifiers(from: flags),
+            applicationCursorKeys: screen.applicationCursorKeys
+        )
         if !bytes.isEmpty { onInput?(bytes) }
     }
 
-    /// DECCKM: in application mode the arrow keys send `ESC O x`, otherwise
-    /// `ESC [ x`.
-    private func cursorKey(_ final: UInt8) -> [UInt8] {
-        screen.applicationCursorKeys ? [0x1B, 0x4F, final] : [0x1B, 0x5B, final]
+    private static func modifiers(from flags: NSEvent.ModifierFlags) -> Keyboard.Modifiers {
+        var modifiers: Keyboard.Modifiers = []
+        if flags.contains(.shift) { modifiers.insert(.shift) }
+        if flags.contains(.control) { modifiers.insert(.control) }
+        if flags.contains(.option) { modifiers.insert(.option) }
+        if flags.contains(.command) { modifiers.insert(.command) }
+        return modifiers
+    }
+
+    // MARK: - Scrollback
+
+    /// Wheel and trackpad scrolling moves the viewport through scrollback rather
+    /// than going to the program, which is what a user expects. Mouse reporting
+    /// takes precedence over this once it lands.
+    override func scrollWheel(with event: NSEvent) {
+        guard !screen.scrollback.isEmpty else { return }
+        if event.hasPreciseScrollingDeltas {
+            scrollRemainder += event.scrollingDeltaY
+            let lines = (scrollRemainder / cellHeight).rounded(.towardZero)
+            scrollRemainder -= lines * cellHeight
+            scroll(by: Int(lines))
+        } else {
+            scroll(by: Int(event.scrollingDeltaY))
+        }
+    }
+
+    /// Positive moves the viewport up into history, the direction a scroll-up
+    /// gesture produces. Clamped by the model, so the oldest line is the floor.
+    private func scroll(by lines: Int) {
+        guard lines != 0 else { return }
+        let updated = min(max(0, scrollOffset + lines), screen.scrollback.count)
+        guard updated != scrollOffset else { return }
+        scrollOffset = updated
+        needsDisplay = true
+    }
+
+    private func returnToLiveScreen() {
+        guard scrollOffset != 0 else { return }
+        scrollOffset = 0
+        scrollRemainder = 0
+        needsDisplay = true
     }
 
     /// Cmd+V. Wrapped in the bracketed-paste guards when the program asked for
@@ -231,7 +292,7 @@ final class TermView: NSView {
     }
 }
 
-/// The colour scheme, in one place so M6's themes have an obvious home.
+/// The colour scheme, in one place so M2's themes have an obvious home.
 enum Theme {
     static let background = CGColor(red: 0.043, green: 0.055, blue: 0.094, alpha: 1)
     static let foreground = CGColor(red: 0.85, green: 0.90, blue: 1.0, alpha: 1)

@@ -23,9 +23,10 @@ $ otool -L .build/release/Nymbra
 > programs are exercised in CI by feeding real terminal output through the
 > parser.
 >
-> It is not yet a daily driver. Missing: tabs, splits, search, scrollback UI,
-> mouse reporting (the modes are tracked but no bytes are sent), text reflow on
-> resize, and the Metal renderer.
+> It is not yet a daily driver. Missing: tabs and splits, text selection and
+> copy, search, mouse reporting (the modes are tracked, but no bytes are sent
+> yet), text reflow on resize, a settings *window* (the model and the file exist;
+> the window does not), and the Metal renderer.
 >
 > See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned and
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it is built.
@@ -107,11 +108,13 @@ Full detail, including the threading model and the invariants that must hold:
 | Milestone | Scope | Status |
 |---|---|---|
 | M0 | PTY, window, CoreText grid, tests, CI | ✅ complete |
-| M1 | VT emulation: parser, cursor, SGR, alt screen | ✅ core complete |
-| M2 | Metal renderer, reflow, mouse reporting | ⏳ next |
-| M3 | Shell integration (OSC 133) and notifications | planned |
-| M4 | Session persistence | planned |
-| M5 | Signed, notarized release and updater | planned |
+| M1 | VT emulation, keyboard, scrollback viewport | ✅ core complete |
+| M1.x | Tabs and splits | ⏳ next |
+| M2 | Settings and configuration, with live preview | planned |
+| M3 | Metal renderer, text selection, reflow, mouse | planned |
+| M4 | Shell integration (OSC 133) and notifications | planned |
+| M5 | Sessions: a PTY host that outlives the window | planned |
+| M6 | Signed, notarized release and updater | planned |
 
 Full plan, feature catalogue and acceptance criteria:
 [docs/ROADMAP.md](docs/ROADMAP.md).

@@ -21,7 +21,7 @@ private struct Term {
 /// scrollback rows, which are whole grids rather than something the screen
 /// can format for us.
 private func lineText(_ cells: [Cell]) -> String {
-    var text = cells.map(\.text).joined()
+    var text = Screen.text(ofLine: cells)
     while text.hasSuffix(" ") { text.removeLast() }
     return text
 }

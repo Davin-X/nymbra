@@ -43,8 +43,8 @@ visible rather than discovered later.
 | SGR: colour, bold, underline, reverse, reset | ✅ 16/256/truecolour, plus italic/faint/conceal/strike/underline styles |
 | Normal + alternate screen | ✅ 47/1047/1048/1049 |
 | Scrollback buffer | ⚠️ modelled (10 000 lines) but **no way to view it yet** |
-| Keyboard: Enter, Backspace, delete, arrows, control keys | ✅ arrows honour DECCKM; meta via Option; Shift-Tab |
-| Function keys F1–F12 | ❌ **not mapped** |
+| Keyboard: Enter, Backspace, delete, arrows, control keys | ✅ arrows honour DECCKM and carry xterm's modifier encoding; Option is meta; Shift-Tab is CBT |
+| Function keys F1–F12 | ✅ F1–F20, in the SS3 and `CSI n ~` forms |
 | UTF-8 across read boundaries, wide characters | ✅ |
 | Combining marks | ✅ asserted in the unit suite |
 | Emoji and grapheme clusters (ZWJ sequences) | ⚠️ emoji width detected; clusters are not grouped into one cell |
@@ -54,12 +54,13 @@ visible rather than discovered later.
 
 | Requirement | State | Milestone |
 |---|---|---|
-| Copy/paste | ⚠️ paste works (bracketed); **no selection, so no copy** | M2 |
-| Search in scrollback | ❌ | M3 |
+| Copy/paste | ⚠️ paste works (bracketed); **no selection, so no copy** | M3 |
+| Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen | — |
+| Search in scrollback | ❌ | M4 |
 | Tabs and split panes | ❌ | M1.x (P0) |
-| Configurable font, colours, keybindings | ❌ `Theme` is hardcoded | M2 |
-| Shell integration: prompt/command boundaries, notifications | ⚠️ bell sounds; `OSC 133` not parsed | M3 |
-| Session recovery/persistence | ❌ | M4 |
+| Settings: theme, font, colours, cursor, keybindings | ❌ `Theme` is a hardcoded struct | M2 |
+| Shell integration: prompt/command boundaries, notifications | ⚠️ bell sounds; `OSC 133` not parsed | M4 |
+| Session recovery/persistence | ❌ | M5 |
 
 `Scripts/emulation-checks.sh` asserts the emulation rows above end to end, on a
 real PTY, with no window — the same script `make check` and CI run.
@@ -91,30 +92,86 @@ The milestone that makes this a terminal rather than a demo.
 - Alternate screen (47, 1047, 1048, 1049)
 - Bracketed paste, focus reporting, and mouse mode/encoding flags
 - Resize that preserves content
+- Keyboard: F1–F20, arrows with DECCKM and xterm's modifier encoding, meta via
+  Option, control combinations (`NymbraInput`)
+- Viewport scrolling through 10 000 lines of scrollback
 
 **Owed — tracked here rather than quietly dropped**
 - Text **reflow** on resize. Resize preserves content but does not rewrap;
-  moved to M2 deliberately.
+  moved to M3 deliberately.
 - **Mouse reporting bytes.** The modes are tracked; no reports are sent yet.
 - A **conformance corpus** of ≥ 300 input → expected-screen cases. There are
-  roughly 100 emulation assertions today, held in-source.
+  roughly 200 emulation assertions today, held in-source.
 - **Fuzz scale** of 10⁶ random bytes. Currently about 10⁵ per run.
 - Hand verification of `vim`, `htop`, `less`, `tmux` and `lazygit` on screen.
   Headless CI covers clear, SGR, the alternate screen, wrapping and wide
   characters.
 
-**Evidence:** 169 checks pass; `make screen-test` drives the parser with real
-shell output, and CI asserts the result without a window.
+**Evidence:** 246 checks pass; `Scripts/emulation-checks.sh` drives real shell
+output through the parser, and CI asserts the result without a window.
 
 **Non-goals:** ligatures, image protocols, Kitty keyboard protocol.
 
-### M2 — Metal renderer, reflow, mouse 🔜
+### M1.x — Tabs and splits 🔜 *still owed from M1*
+
+A terminal with one pane is a toy. Broken out of M1 deliberately, so that the
+emulation core could be finished and verified first.
+
+**Scope**
+- Tabs, with the unread badge M4 will fill in
+- Horizontal and vertical splits, resizable
+- Focus follows a click; keyboard navigation between panes
+- Each pane owns an independent `Terminal`; the view draws the focused model
+
+**Acceptance:** four panes, each running a different program, resized and closed
+independently, with no shared mutable state between them.
+
+### M2 — Settings and configuration 🔜 *before the renderer, not after*
+
+Settings cannot be added late. Live preview means the renderer must be a
+function of configuration rather than of a hardcoded `Theme`, so this milestone
+lands before the renderer is rewritten — otherwise that rewrite is paid for
+twice.
+
+**Scope**
+- A `Configuration` value type that is `Codable`, has documented defaults, and
+  is validated on load, so a hand-edited mistake cannot make the app unusable
+- Stored as plain JSON in `~/Library/Application Support/Nymbra/`. The format is
+  part of the public surface: hand-editable and stable, and unknown keys from a
+  newer version are ignored rather than fatal
+- A settings window with a **live preview**: changes apply to open terminals as
+  they are made, with no restart
+
+| Setting | Detail |
+|---|---|
+| Appearance | Theme, font family and size, with a live preview |
+| Colours | Presets — dark, light, high contrast — plus per-colour overrides |
+| Behaviour | Cursor style and blink, scrollback size, confirm before closing a session that is still running |
+| Keyboard | The default shortcuts, shown in full, and every one of them remappable |
+| Shell | The default shell, defaulting to `$SHELL` rather than a hardcoded path |
+| Reset | Restore the original settings, as a diff rather than a silent wipe |
+
+**Acceptance:** change the font size and theme in the settings window and watch
+an open terminal update immediately; quit, relaunch, and find the settings
+intact; delete the config file and start on defaults; hand-edit it into an
+invalid state and start on defaults *with a warning*, rather than failing to
+launch.
+
+**Testable headlessly?** Yes, which is the point. The settings *model* is UI-free
+and asserted in `NymbraCheck` — defaults round-trip, validation rejects
+nonsense, reset restores, unknown keys are ignored. The window itself is thin.
+
+See [ADR-0006](adr/0006-configuration-as-a-validated-json-file.md) for why the
+file is JSON, why loading can never fail, and why the model is UI-free.
+
+### M3 — Metal renderer, reflow, mouse 🔜
 
 **Scope**
 - Glyph atlas rasterised once per (font, size, style) via CoreText
 - One instanced draw call per frame; damage tracking when worthwhile
 - 60 fps scrolling of a full screen at 4K; steady-state idle near 0% CPU
 - Block cursor, selection highlight, undercurl
+- Text selection, and therefore copy
 - **Text reflow on resize** — carried over from M1, which preserves content but
   does not rewrap
 - **Mouse reporting bytes** for the modes already tracked (1000/1002/1003,
@@ -124,7 +181,7 @@ shell output, and CI asserts the result without a window.
 CoreText drawing is removed, and `TermView` is a pure function of the model.
 See [ADR-0004](adr/0004-coretext-first-metal-later.md).
 
-### M3 — Shell integration and attention ⏳ *the differentiator*
+### M4 — Shell integration and attention ⏳ *the differentiator*
 
 Where Nymbra becomes something other terminals are not.
 
@@ -141,7 +198,7 @@ Where Nymbra becomes something other terminals are not.
 notification fires, and the command appears in the timeline with its exit code.
 Fully local; no network calls.
 
-### M4 — Sessions 🔜
+### M5 — Sessions 🔜
 
 **Scope**
 - PTY host that outlives the window, so a crash or quit does not kill work
@@ -150,7 +207,7 @@ Fully local; no network calls.
 **Acceptance:** `kill -9` the app during a build; relaunch and find the build
 still running with its output intact.
 
-### M5 — Distribution 🔜
+### M6 — Distribution 🔜
 
 **Scope**
 - Universal binary (arm64 + x86_64)
@@ -161,11 +218,6 @@ still running with its output intact.
 
 **Acceptance:** a fresh Mac downloads the DMG and opens it without a Gatekeeper
 warning.
-
-### M6 — Configuration and polish 💭
-
-Config file, remappable keybindings, themes, font picker, `Ghostty`-style
-config familiarity.
 
 ## Feature catalogue
 
@@ -183,8 +235,7 @@ Priority: **P0** required for v0.1 · **P1** v0.1 if cheap · **P2** later.
 | Resize with content preservation | P0 | M1 |
 | Bracketed paste | P0 | M1 |
 | Mouse reporting | P1 | M1 |
-| Scrollback with search | P1 | M2 |
-| Ligatures | P2 | M6 |
+| Ligatures | P2 | M3 |
 | Image protocols (sixel / Kitty) | 💭 | — |
 | Kitty keyboard protocol | 💭 | — |
 
@@ -192,28 +243,36 @@ Priority: **P0** required for v0.1 · **P1** v0.1 if cheap · **P2** later.
 
 | Feature | Priority | Milestone |
 |---|---|---|
-| OSC 133 integration scripts (`zsh`/`bash`/`fish`) | P0 | M3 |
-| Exit-status indicators in the gutter | P0 | M3 |
-| Background-tab unread badge | P0 | M3 |
-| Long-command notifications | P1 | M3 |
-| Command timeline (local, searchable) | P1 | M3 |
-| "What needs you" digest | P2 | M3 |
-| Jump to previous/next prompt | P1 | M1 (data) / M3 (UX) |
+| OSC 133 integration scripts (`zsh`/`bash`/`fish`) | P0 | M4 |
+| Exit-status indicators in the gutter | P0 | M4 |
+| Background-tab unread badge | P0 | M4 |
+| Long-command notifications | P1 | M4 |
+| Command timeline (local, searchable) | P1 | M4 |
+| "What needs you" digest | P2 | M4 |
+| Jump to previous/next prompt | P1 | M1 (data) / M4 (UX) |
 
 ### Application
 
 | Feature | Priority | Milestone |
 |---|---|---|
-| Tabs | P0 | M1 |
-| Splits (horizontal/vertical) | P0 | M1 |
-| Command palette | P1 | M6 |
-| Search in scrollback | P1 | M2 |
-| Themes, dark + light | P1 | M6 |
-| Font picker (system fonts + user Nerd Fonts) | P1 | M6 |
-| Full screen | P2 | M6 |
-| Config file | P1 | M6 |
-| Remappable keybindings | P1 | M6 |
-| Multiple windows | P2 | M4 |
+| Tabs | P0 | M1.x |
+| Splits (horizontal/vertical) | P0 | M1.x |
+| Settings window with live preview | P1 | M2 |
+| Theme presets: dark, light, high contrast | P1 | M2 |
+| Font family and size, with a preview | P1 | M2 |
+| Cursor style and blink | P1 | M2 |
+| Scrollback size | P1 | M2 |
+| Confirm before closing a running session | P1 | M2 |
+| Default shell selection | P1 | M2 |
+| Remappable keybindings | P1 | M2 |
+| Config file | P1 | M2 |
+| Reset to defaults | P1 | M2 |
+| Command palette | P1 | M2 |
+| Full screen | P2 | M2 |
+| Search in scrollback | P1 | M4 |
+| Text selection and copy | P0 | M3 |
+| Multiple windows | P2 | M5 |
+| VoiceOver / accessibility | P1 | M2 |
 
 ### Non-functional
 
@@ -221,9 +280,8 @@ Priority: **P0** required for v0.1 · **P1** v0.1 if cheap · **P2** later.
 |---|---|---|
 | No network calls of any kind | P0 | always |
 | Input latency below one frame | P0 | M1 |
-| Idle CPU near zero | P0 | M2 |
-| Total memory below 100 MB with 10 tabs | P1 | M2 |
-| VoiceOver / accessibility | P1 | M6 |
+| Idle CPU near zero | P0 | M3 |
+| Total memory below 100 MB with 10 tabs | P1 | M3 |
 
 ## Differentiators
 
@@ -247,7 +305,7 @@ it is probably out of scope.
 
 ## Release criteria for v0.1
 
-- [ ] M1 and M3 complete
+- [ ] M1, M1.x, M2 and M4 complete
 - [ ] `vim`, `htop`, `tmux`, `lazygit`, `ssh` verified working
 - [ ] Fuzzer clean
 - [ ] `make check` green on a clean clone
@@ -259,7 +317,7 @@ it is probably out of scope.
 
 | Question | Notes |
 |---|---|
-| Should the PTY host be a separate process? | Needed for M4; keep PTY behind `NymbraCore`'s interface so it is a swap |
+| Should the PTY host be a separate process? | Needed for M5; keep PTY behind `NymbraCore`'s interface so it is a swap |
 | Do we bundle a Nerd Font, or use the user's? | A native app can resolve user fonts via CoreText, so bundling may be unnecessary |
-| Do we read Ghostty-style config? | Familiarity vs. taking on someone else's format |
-| Scrollback in memory or on disk? | On disk unlocks M4 restore at the cost of complexity |
+| Do we read Ghostty-style config? | Familiarity versus taking on someone else's format. Our own documented JSON is the answer for M2; revisit once it is stable |
+| Scrollback in memory or on disk? | On disk unlocks M5 restore at the cost of complexity |
