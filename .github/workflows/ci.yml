@@ -13,7 +13,10 @@ concurrency:
 jobs:
   check:
     name: build, test, architecture
-    runs-on: macos-14
+    # Package.swift requires Swift tools 6.0; the macos-14 image only ships
+    # Swift 5.10, so pin a newer image and assert the toolchain below.
+    # (Do not "modernise" this to macos-14: it will not build.)
+    runs-on: macos-15
     timeout-minutes: 20
 
     steps:
@@ -23,6 +26,14 @@ jobs:
         run: |
           swift --version
           xcode-select -p
+          # Fail loudly if the runner image ever regresses below what
+          # Package.swift requires, instead of a cryptic manifest error.
+          major=$(swift --version 2>&1 | sed -n 's/.*Swift version \([0-9][0-9]*\).*/\1/p' | head -1)
+          if [ "${major:-0}" -lt 6 ]; then
+            echo "::error::Nymbra requires Swift 6 or newer (found: ${major:-unknown})"
+            exit 1
+          fi
+          echo "Swift major OK: $major"
 
       - name: Architecture guard
         run: |

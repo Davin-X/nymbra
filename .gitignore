@@ -1,5 +1,6 @@
 # build output
 .build/
+.swiftpm/
 *.o
 *.dSYM/
 
@@ -9,3 +10,6 @@ Nymbra.app
 
 # macOS
 .DS_Store
+
+# editors (the Swift extension and JetBrains IDEs generate these)
+.idea/

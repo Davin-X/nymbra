@@ -41,6 +41,7 @@ The differentiators we intend to own are listed in
 |---|---|
 | macOS | 11 or later |
 | Toolchain | Xcode **Command Line Tools** (`xcode-select --install`) |
+| Swift | 6.0 or later |
 | Xcode | Not required |
 | Runtime dependencies | None |
 
