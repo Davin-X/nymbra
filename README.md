@@ -17,10 +17,15 @@ $ otool -L .build/release/Nymbra
     AppKit, CoreText, CoreGraphics, Foundation, libSystem (Apple SDK only)
 ```
 
-> **Status: pre-alpha.** Nymbra is scaffolding, not a daily driver. It opens a
-> window, runs your login shell, and draws output on a CoreText grid.
-> It has no cursor, no colour, no alternate screen, and no scrollback across
-> resizes — running `vim` or `htop` will produce nonsense.
+> **Status: pre-alpha.** The emulator core works: Nymbra runs your login shell
+> and emulates cursor movement, colour, erasing, line and character editing,
+> scroll regions, the alternate screen, wrapping and resize. Full-screen
+> programs are exercised in CI by feeding real terminal output through the
+> parser.
+>
+> It is not yet a daily driver. Missing: tabs, splits, search, scrollback UI,
+> mouse reporting (the modes are tracked but no bytes are sent), text reflow on
+> resize, and the Metal renderer.
 >
 > See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned and
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it is built.
@@ -66,6 +71,7 @@ There are no binary releases yet.
 | `make build` | Release build |
 | `make test` | Run the test harness |
 | `make pty-test` | Headless proof that a login shell runs on a PTY |
+| `make screen-test` | Feed real output through the parser and dump the screen |
 | `make check` | Everything CI runs |
 | `make clean` | Remove build output |
 
@@ -101,8 +107,8 @@ Full detail, including the threading model and the invariants that must hold:
 | Milestone | Scope | Status |
 |---|---|---|
 | M0 | PTY, window, CoreText grid, tests, CI | ✅ complete |
-| M1 | VT emulation: cursor, SGR colour, alt screen | ⏳ next |
-| M2 | Metal renderer with a glyph atlas | planned |
+| M1 | VT emulation: parser, cursor, SGR, alt screen | ✅ core complete |
+| M2 | Metal renderer, reflow, mouse reporting | ⏳ next |
 | M3 | Shell integration (OSC 133) and notifications | planned |
 | M4 | Session persistence | planned |
 | M5 | Signed, notarized release and updater | planned |

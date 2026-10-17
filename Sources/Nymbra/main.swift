@@ -2,24 +2,52 @@ import AppKit
 import Foundation
 import NymbraCore
 
-// MARK: - Headless proof
+// MARK: - Headless proofs
 //
-// Proves the PTY works without needing a GUI, so CI can run it.
+// CI cannot look at a window, so correctness is demonstrated by driving the
+// emulator with real bytes and printing what the screen model made of them.
 
+/// Spawn a login shell, run one command, and print every raw byte it produced.
 func runPTYTest() {
     do {
-        let pty = try spawnShell(rows: 24, cols: 80)
-        ptyWrite(pty.master, Array("echo PTY_OK; echo TERM=$TERM; tty; id -un; uname -m; exit\n".utf8))
+        let terminal = try Terminal(rows: 24, cols: 80)
+        terminal.send("echo PTY_OK; echo TERM=$TERM; tty; id -un; uname -m; exit\n")
 
         var output = [UInt8]()
         var chunk = [UInt8](repeating: 0, count: 4096)
         while true {
-            let n = ptyRead(pty.master, into: &chunk)
-            if n <= 0 { break }
-            output.append(contentsOf: chunk[0..<n])
+            let count = ptyRead(terminal.master, into: &chunk)
+            if count <= 0 { break }
+            output.append(contentsOf: chunk[0..<count])
         }
-        waitpid(pty.pid, nil, 0)
+        waitpid(terminal.pid, nil, 0)
         FileHandle.standardOutput.write(Data(output))
+    } catch {
+        FileHandle.standardError.write(Data("\(error)\n".utf8))
+        exit(1)
+    }
+}
+
+/// Feed a shell's output through the real parser and print the resulting screen.
+/// This is the closest thing to "does a terminal render this correctly" that a
+/// headless process can assert.
+///
+/// The default dump is the text a user would see. `--screen-debug` instead marks
+/// blank cells with `·` and the second half of a wide character with `→`, which
+/// is what you want when diagnosing, but which would defeat text assertions.
+func runScreenTest(_ command: String, debug: Bool) {
+    do {
+        let terminal = try Terminal(rows: 24, cols: 80)
+        terminal.send(command + "\nexit\n")
+
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = ptyRead(terminal.master, into: &chunk)
+            if count <= 0 { break }
+            terminal.parser.feed(Array(chunk[0..<count]))
+        }
+        waitpid(terminal.pid, nil, 0)
+        print(debug ? terminal.screen.debugDump() : terminal.screen.dump())
     } catch {
         FileHandle.standardError.write(Data("\(error)\n".utf8))
         exit(1)
@@ -31,14 +59,35 @@ if CommandLine.arguments.contains("--pty-test") {
     exit(0)
 }
 
+for (flag, debug) in [("--screen-test", false), ("--screen-debug", true)] {
+    if let index = CommandLine.arguments.firstIndex(of: flag) {
+        let command = index + 1 < CommandLine.arguments.count
+            ? CommandLine.arguments[index + 1]
+            : "echo hello"
+        runScreenTest(command, debug: debug)
+        exit(0)
+    }
+}
+
 // MARK: - Application
+
+// The shell is spawned *first*, before AppKit is initialised. `forkpty` forks,
+// and forking a process that already has AppKit's threads and Mach ports running
+// is undefined behaviour (ADR-0002). The PTY is opened at a default size and
+// corrected with TIOCSWINSZ once the window exists.
+let terminal: Terminal
+do {
+    terminal = try Terminal(rows: 24, cols: 80)
+} catch {
+    FileHandle.standardError.write(Data("\(error)\n".utf8))
+    exit(1)
+}
 
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
-let buffer = TermBuffer()
 let frame = NSRect(x: 0, y: 0, width: 1000, height: 640)
-let view = TermView(frame: frame, buffer: buffer)
+let view = TermView(frame: frame, screen: terminal.screen)
 
 let window = NSWindow(
     contentRect: frame,
@@ -52,31 +101,19 @@ window.center()
 window.makeKeyAndOrderFront(nil)
 window.makeFirstResponder(view)
 
-// Must happen before any other work starts: forkpty() forks the process.
-let pty: PTY
-do {
-    pty = try spawnShell(rows: view.rows, cols: view.cols)
-} catch {
-    FileHandle.standardError.write(Data("\(error)\n".utf8))
-    exit(1)
-}
+view.onInput = { bytes in terminal.send(bytes) }
+view.onResize = { rows, cols in terminal.resize(rows: rows, cols: cols) }
 
-view.onInput = { bytes in ptyWrite(pty.master, bytes) }
-view.onResize = { rows, cols in ptyResize(pty.master, rows: rows, cols: cols) }
+// The window's real grid size is only known now, so tell the shell about it.
+terminal.resize(rows: view.rows, cols: view.cols)
 
-DispatchQueue.global(qos: .userInteractive).async {
-    var chunk = [UInt8](repeating: 0, count: 8192)
-    while true {
-        let n = ptyRead(pty.master, into: &chunk)
-        if n <= 0 { break }
-        let bytes = Array(chunk[0..<n])
-        DispatchQueue.main.async {
-            buffer.feed(bytes)
-            view.needsDisplay = true
-        }
-    }
-    DispatchQueue.main.async { window.title = "Nymbra \u{2014} shell exited" }
+terminal.onUpdate = { [weak view] in
+    view?.needsDisplay = true
+    if !terminal.screen.title.isEmpty { window.title = terminal.screen.title }
 }
+terminal.onBell = { NSSound.beep() }
+terminal.onExit = { window.title = "Nymbra \u{2014} shell exited" }
+terminal.start()
 
 app.activate(ignoringOtherApps: true)
 app.run()

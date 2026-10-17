@@ -53,6 +53,13 @@ jobs:
           grep -q "TERM=xterm-256color" pty.out
           echo "PTY smoke test passed"
 
+      # Correctness of the emulator, asserted without a window. The script
+      # spawns real shells on real PTYs; `make check` runs the identical script.
+      - name: Emulation checks
+        run: |
+          chmod +x Scripts/emulation-checks.sh
+          ./Scripts/emulation-checks.sh
+
       - name: Docs present
         run: |
           for f in README.md LICENSE CONTRIBUTING.md CHANGELOG.md \

@@ -29,6 +29,41 @@ These decide arguments. When in doubt, the higher principle wins.
    looking at a window, it is designed wrongly.
 5. **Every dependency is a liability.** See [ADR-0001](adr/0001-native-swift-zero-runtime-dependencies.md).
 
+## Coverage against a minimally usable terminal
+
+The checklist a terminal must satisfy to be worth opening. Kept here so gaps are
+visible rather than discovered later.
+
+### Core emulation
+
+| Requirement | State |
+|---|---|
+| Shell + PTY: launch, input, output, exit, resize via `TIOCSWINSZ` | ✅ |
+| Escape sequences: cursor, clear line/screen, scroll regions, save/restore | ✅ |
+| SGR: colour, bold, underline, reverse, reset | ✅ 16/256/truecolour, plus italic/faint/conceal/strike/underline styles |
+| Normal + alternate screen | ✅ 47/1047/1048/1049 |
+| Scrollback buffer | ⚠️ modelled (10 000 lines) but **no way to view it yet** |
+| Keyboard: Enter, Backspace, delete, arrows, control keys | ✅ arrows honour DECCKM; meta via Option; Shift-Tab |
+| Function keys F1–F12 | ❌ **not mapped** |
+| UTF-8 across read boundaries, wide characters | ✅ |
+| Combining marks | ✅ asserted in the unit suite |
+| Emoji and grapheme clusters (ZWJ sequences) | ⚠️ emoji width detected; clusters are not grouped into one cell |
+| Robustness under malformed/long sequences | ⚠️ parser is total and fuzzed at ~10⁵ bytes; target is 10⁶ |
+
+### App features
+
+| Requirement | State | Milestone |
+|---|---|---|
+| Copy/paste | ⚠️ paste works (bracketed); **no selection, so no copy** | M2 |
+| Search in scrollback | ❌ | M3 |
+| Tabs and split panes | ❌ | M1.x (P0) |
+| Configurable font, colours, keybindings | ❌ `Theme` is hardcoded | M2 |
+| Shell integration: prompt/command boundaries, notifications | ⚠️ bell sounds; `OSC 133` not parsed | M3 |
+| Session recovery/persistence | ❌ | M4 |
+
+`Scripts/emulation-checks.sh` asserts the emulation rows above end to end, on a
+real PTY, with no window — the same script `make check` and CI run.
+
 ## Milestones
 
 ### M0 — Foundation ✅
@@ -39,34 +74,51 @@ and CI.
 **Acceptance (met):** `make check` passes; `--pty-test` runs a login shell;
 the architecture guard passes.
 
-### M1 — VT emulation ⏳ *next*
+### M1 — VT emulation ✅ *core complete*
 
 The milestone that makes this a terminal rather than a demo.
 
-**Scope**
-- Table-driven parser: ground, escape, CSI, OSC, DCS, charset, SOS/PM/APC
-- Cursor: position, visibility, save/restore, movement, tab stops
-- SGR: 16-colour, 256-colour, truecolour; bold/italic/underline/reverse/strike
-- Screen: erase (line/screen), insert/delete (char/line), scroll region,
-  wrapping (DECAWM), origin mode
-- Alternate screen (`ESC [?1049h/l`) — required by `vim`, `less`, `htop`
-- Bracketed paste, mouse reporting enums, focus reporting
-- Resize that preserves content and reflows sanely
+**Delivered**
+- A state machine over the ground, escape, CSI, OSC, DCS, charset and
+  SOS/PM/APC families, with ECMA-48 parameters including colon sub-parameters
+- Cursor: position, visibility, shape (DECSCUSR), save/restore, movement and
+  tab stops (HTS/TBC/CBT)
+- SGR: 16-, 256- and 24-bit colour; underline styles; bold, faint, italic,
+  reverse, conceal and strike
+- Screen: erase (ED/EL/ECH), insert and delete (IL/DL/ICH/DCH), scroll regions
+  (DECSTBM) whose margins are respected by cursor movement, DECAWM with deferred
+  wrap, origin mode (DECOM)
+- Alternate screen (47, 1047, 1048, 1049)
+- Bracketed paste, focus reporting, and mouse mode/encoding flags
+- Resize that preserves content
 
-**Acceptance**
-- `vim`, `htop`, `less`, `git log`, `tmux` and `lazygit` render correctly
-- A conformance corpus of ≥ 300 input → expected-screen cases passes
-- A fuzzer runs 10⁶ random byte sequences with no crash, hang or unbounded growth
+**Owed — tracked here rather than quietly dropped**
+- Text **reflow** on resize. Resize preserves content but does not rewrap;
+  moved to M2 deliberately.
+- **Mouse reporting bytes.** The modes are tracked; no reports are sent yet.
+- A **conformance corpus** of ≥ 300 input → expected-screen cases. There are
+  roughly 100 emulation assertions today, held in-source.
+- **Fuzz scale** of 10⁶ random bytes. Currently about 10⁵ per run.
+- Hand verification of `vim`, `htop`, `less`, `tmux` and `lazygit` on screen.
+  Headless CI covers clear, SGR, the alternate screen, wrapping and wide
+  characters.
+
+**Evidence:** 169 checks pass; `make screen-test` drives the parser with real
+shell output, and CI asserts the result without a window.
 
 **Non-goals:** ligatures, image protocols, Kitty keyboard protocol.
 
-### M2 — Metal renderer 🔜
+### M2 — Metal renderer, reflow, mouse 🔜
 
 **Scope**
 - Glyph atlas rasterised once per (font, size, style) via CoreText
 - One instanced draw call per frame; damage tracking when worthwhile
 - 60 fps scrolling of a full screen at 4K; steady-state idle near 0% CPU
 - Block cursor, selection highlight, undercurl
+- **Text reflow on resize** — carried over from M1, which preserves content but
+  does not rewrap
+- **Mouse reporting bytes** for the modes already tracked (1000/1002/1003,
+  x10 and SGR encodings)
 
 **Acceptance:** a full-screen `yes` flood stays at frame rate with flat memory;
 CoreText drawing is removed, and `TermView` is a pure function of the model.

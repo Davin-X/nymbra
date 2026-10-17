@@ -6,6 +6,7 @@ import Foundation
 
 let harness = Harness()
 
-termBufferSuite(harness)
+screenSuite(harness)
+parserSuite(harness)
 
 exit(harness.report())

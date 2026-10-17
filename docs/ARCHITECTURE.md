@@ -51,13 +51,13 @@ shell  ──bytes──▶  PTY master fd
                   reader thread            (one per session, owned by us)
                         │  chunks
                         ▼
-                  VT parser                (NymbraCore — planned)
+                  VT parser                (NymbraCore/Parser.swift)
                         │  mutations
                         ▼
-                  screen model             (NymbraCore — cells, cursor, attrs)
+                  screen model             (NymbraCore/Screen.swift)
                         │  damage
                         ▼
-                  renderer                 (Nymbra — CoreText now, Metal later)
+                  renderer                 (Nymbra/TermView.swift — CoreText now, Metal in M2)
 ```
 
 Each stage has one job. The parser never touches a graphics context; the
@@ -94,15 +94,19 @@ actor-isolated boundary — that change must come with a benchmark.
 ## Where the difficulty lives
 
 The VT parser. ECMA-48 plus the `xterm` control-sequence reference define
-several hundred behaviours, and the last 10% of them are 90% of the work. The
-plan is:
+several hundred behaviours, and the last 10% of them are 90% of the work.
+`NymbraCore/Parser.swift` is a single state machine over the families: ground,
+escape, CSI, OSC, DCS, charset and the `SOS`/`PM`/`APC` strings. Every family
+shares the entry rules and differs only in how it terminates — the table at the
+top of that file is the whole design, and it is the place implementations go
+wrong.
 
-1. A table-driven parser over the state machine families: ground, escape, CSI,
-   OSC, DCS, charset, plus the `SOS`/`PM`/`APC` string sequences.
-2. A **conformance corpus** of input → expected screen pairs, run by
-   `NymbraCheck`. Grows continuously; never deleted.
-3. Fuzzing. A terminal parses bytes it did not author — including bytes
-   returned over `ssh`. The parser must be total (invariant 3).
+Still owed:
+
+1. A larger **conformance corpus** of input → expected screen pairs. Today these
+   are assertions in-source rather than fixtures. It may grow; it must not shrink.
+2. Fuzzing at scale. The parser must be total (invariant 3), and is currently
+   fuzzed with ~10⁵ random bytes per run rather than the 10⁶ the roadmap asks for.
 
 Written from the specifications, not from another emulator's source. See
 ADR-0001.
@@ -113,8 +117,9 @@ ADR-0001.
 |---|---|
 | Escape-sequence state machine | Unit tests in `NymbraCheck` |
 | Screen model | Unit tests, including resize and scrollback |
-| Parser conformance | Fixture corpus: input bytes → expected cells |
+| Parser conformance | Input bytes → expected cells, asserted from `NymbraCheck` |
 | PTY | `--pty-test` smoke test in CI |
+| Emulation, end to end | `--screen-test` feeds real shell output through the parser in CI |
 | Rendering | Manual + snapshot once Metal lands |
 
 `make check` runs everything that can run without a human.
