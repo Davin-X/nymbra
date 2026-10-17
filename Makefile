@@ -23,7 +23,10 @@ help:
 build:
 	swift build -c release
 
-test:
+# `build` first, deliberately: the suite starts real shells, and the program
+# that gives a shell its terminal (NymbraSpawn) is looked for beside the binary
+# that is running. `swift run` on its own is not guaranteed to have built it.
+test: build
 	swift run -c release NymbraCheck
 
 run: build

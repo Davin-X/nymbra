@@ -29,17 +29,24 @@ swift build -c release --package-path "$ROOT" >/dev/null
 # trusted, because a missing binary would otherwise make a bundle that fails only
 # when somebody else opens it.
 BIN_DIR="$(swift build -c release --package-path "$ROOT" --show-bin-path)"
-if [ ! -x "$BIN_DIR/Nymbra" ]; then
-  echo "app: no binary at $BIN_DIR/Nymbra" >&2
-  exit 1
-fi
+for product in Nymbra NymbraSpawn; do
+  if [ ! -x "$BIN_DIR/$product" ]; then
+    echo "app: no $product at $BIN_DIR/$product" >&2
+    exit 1
+  fi
+done
 
 echo "app: assembling $APP"
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
 cp "$BIN_DIR/Nymbra" "$CONTENTS/MacOS/Nymbra"
-chmod +x "$CONTENTS/MacOS/Nymbra"
+# NymbraSpawn goes next to the application binary because that is where the
+# application looks for it. It is what gives a shell its controlling terminal
+# (ADR-0008): a bundle that shipped without it would open, show a window, and
+# be unable to start a shell in it.
+cp "$BIN_DIR/NymbraSpawn" "$CONTENTS/MacOS/NymbraSpawn"
+chmod +x "$CONTENTS/MacOS/Nymbra" "$CONTENTS/MacOS/NymbraSpawn"
 
 # The icon is drawn rather than stored as a binary: reviewable, reproducible, and
 # derived from the same colours the terminal draws with. See Scripts/make-icon.swift.

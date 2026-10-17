@@ -127,6 +127,18 @@ Shells are started with `openpty()` + `posix_spawn()` (ADR-0007), the first wind
 is made by the same code path as every other, and closing a window is no longer a
 dead end: `⌘N` and a Dock click both bring one back, with a live shell in it.
 
+**And a second one, found by asking four shells at once:** every shell the
+application started ran **without a controlling terminal**. The prompt worked,
+input echoed, commands ran — and Ctrl+C, Ctrl+Z and job control did nothing,
+because the terminal had no foreground process group for a signal to be delivered
+to. ADR-0007's file action could not claim one: POSIX runs file actions before
+the session is created, so the open happened in the parent's session, where
+claiming a terminal is not possible. The claim now lives in a helper program that
+`posix_spawn` execs and that execs the shell in turn (ADR-0008). This is the M1.x
+test earning its keep before the feature it was written for even exists: the
+shells that look correct cannot answer the question, and the witness that can is
+`/bin/sleep`, which never touches its terminal.
+
 **Still to do**
 - Tabs, with the unread badge M4 will fill in
 - Horizontal and vertical splits, resizable
@@ -259,6 +271,12 @@ still running with its output intact.
 - ~~An application bundle, with an icon~~ ✅ `make app`
 - Universal binary (arm64 + x86_64)
 - Codesigning, notarization, hardened runtime
+- **A stable identity, which is not only about Gatekeeper.** macOS records Full
+  Disk Access and the Desktop/Documents/Downloads grants against a *code
+  signature*: an ad-hoc-signed build is a different program every time it is
+  rebuilt, so the grant does not survive, and the prompt that would explain why
+  never appears. A terminal that cannot read the user's files is not a terminal,
+  so the `Info.plist` usage strings for the folders it asks for belong here too.
 - Tauri-free updater against GitHub Releases
 - `brew install --cask nymbra`
 - `THIRD_PARTY_NOTICES` and an in-app open-source licences screen

@@ -10,6 +10,15 @@ import NymbraCore
 /// and the emulator took the blame. "Which shell runs, and what happens when the
 /// answer is nonsense" has a right answer, so it is asserted here rather than
 /// discovered on a runner.
+///
+/// One rule shapes every block below: **a PTY is read or it stalls**. The
+/// kernel's buffer between a terminal and its reader is about a kilobyte, and a
+/// program that has filled it blocks in `write` — including one that is halfway
+/// through drawing a prompt, which is how a test that stops reading between
+/// assertion and assertion ends up sending input to a shell that cannot read it.
+/// The application always has a reader, so a test that waits without reading is
+/// testing a terminal that does not exist. `waitForGroup` therefore drains while
+/// it waits, and everything that blocks has a deadline.
 func ptySuite(_ h: Harness) {
     h.suite("pty")
 
@@ -61,16 +70,8 @@ func ptySuite(_ h: Harness) {
     do {
         let pty = try spawnShell(rows: 24, cols: 80, shell: "/bin/sh")
         ptyWrite(pty.master, Array("echo NYMBRA_$((6*7))\nexit\n".utf8))
-
-        var output = [UInt8]()
-        var chunk = [UInt8](repeating: 0, count: 4096)
-        while true {
-            let count = ptyRead(pty.master, into: &chunk)
-            if count <= 0 { break }
-            output.append(contentsOf: chunk[0..<count])
-        }
-        waitpid(pty.pid, nil, 0)
-        let text = String(decoding: output, as: UTF8.self)
+        let text = drain(pty.master)
+        reap(pty.pid)
 
         // `$((6*7))` has to be *evaluated*, which the echo of the command line
         // cannot do for it.
@@ -89,9 +90,89 @@ func ptySuite(_ h: Harness) {
     // A PTY that is not the child's *controlling* terminal is the quietest
     // failure available here: the shell runs, prints a prompt, echoes what you
     // type, and Ctrl+C does nothing — because there is no foreground process
-    // group for the tty driver to signal. Nothing on the screen says so. Only
-    // `tcgetpgrp` and an interrupted job can tell the difference, so both are
-    // asked directly.
+    // group for the tty driver to signal. Nothing on the screen says so.
+    //
+    // `/bin/sh` alone could not be asked about it, and that is worth stating
+    // plainly, because this suite believed it could for several commits. bash
+    // *reacquires* a terminal for itself — it calls `setsid()` and reopens the
+    // tty when it finds it has none — so the assertions below passed while every
+    // shell the application started had no terminal at all. What catches that is
+    // a witness that does not help itself: `/bin/sleep` never touches its
+    // terminal, and a shell that does not claim one for itself (zsh, which is
+    // what the application starts by default) is asked the same question.
+
+    h.expect((try? spawnHelperPath()) != nil,
+             "the program that gives a shell its terminal is next to this one")
+
+    // The smallest version of the question. Without the helper this is 0 for
+    // every shell, forever, and nothing on screen says so.
+    do {
+        let pty = try spawn(program: "/bin/sleep", arguments: ["sleep", "30"],
+                            rows: 24, cols: 80)
+        defer { close(pty.master) }
+        h.expect(waitForGroup(pty.master, timeout: 3) { $0 == pty.pid } != nil,
+                 "a program that ignores its terminal still has one")
+        h.equal(getsid(pty.pid), pty.pid,
+                "and the program is the leader of the session that owns it")
+        kill(pty.pid, SIGKILL)
+        reap(pty.pid)
+    } catch {
+        h.expect(false, "a program can be given a terminal (\(error))")
+    }
+
+    // And a shell that does not rescue itself. zsh turns job control off,
+    // silently, when it cannot find its terminal — which is what "job control
+    // does not work in Nymbra" looked like from the outside, with a prompt that
+    // worked and a Ctrl+C that did nothing.
+    do {
+        let pty = try spawnShell(rows: 24, cols: 80, shell: "/bin/zsh")
+        defer { close(pty.master) }
+        h.expect(waitForGroup(pty.master, timeout: 5) { $0 == pty.pid } != nil,
+                 "a shell that does not claim a terminal for itself is given one")
+
+        ptyWrite(pty.master, Array("printf 'NYMBRA_ZSH_%s\\n' READY\n".utf8))
+        h.expect(readUntil(pty.master, marker: "NYMBRA_ZSH_READY", timeout: 5)
+                    .contains("NYMBRA_ZSH_READY"),
+                 "and reads a command sent down the PTY")
+
+        ptyWrite(pty.master, Array("sleep 30\n".utf8))
+        let job = waitForGroup(pty.master, timeout: 5) { $0 != pty.pid }
+        h.expect(job != nil, "a job in a zsh pane gets its own process group")
+        if let job {
+            ptyWrite(pty.master, [0x03])
+            h.expect(waitForGroup(pty.master, timeout: 5) { $0 == pty.pid } != nil,
+                     "Ctrl+C hands a zsh pane back to its shell")
+            h.expect(kill(job, 0) != 0, "and the interrupted job is gone")
+            kill(job, SIGKILL) // only reached if the assertion above failed
+        }
+
+        ptyWrite(pty.master, Array("exit\n".utf8))
+        _ = drain(pty.master)
+        reap(pty.pid)
+    } catch {
+        h.expect(false, "zsh can be given a terminal (\(error))")
+    }
+
+    // The shell is given its terminal and nothing else. A shell that inherits
+    // the master of its own terminal keeps the pane alive after it exits, and so
+    // does every command it starts. The descriptor is asked about by number, and
+    // `test -e` opens nothing, so the answer cannot be confused by a descriptor
+    // the question itself allocated.
+    do {
+        let pty = try spawnShell(rows: 24, cols: 80, shell: "/bin/sh")
+        defer { close(pty.master) }
+        let question = "printf 'NYMBRA_FDS_DONE_%s\\n' "
+            + "\"$(test -e /dev/fd/\(pty.master) && echo INHERITED || echo CLEAN)\"\n"
+        ptyWrite(pty.master, Array(question.utf8))
+        let answer = readUntil(pty.master, marker: "NYMBRA_FDS_DONE_CLEAN", timeout: 5)
+        h.expect(!answer.contains("NYMBRA_FDS_DONE_INHERITED"),
+                 "the shell does not inherit the other end of its terminal")
+        ptyWrite(pty.master, Array("exit\n".utf8))
+        _ = drain(pty.master)
+        reap(pty.pid)
+    } catch {
+        h.expect(false, "a shell can be given a terminal without the rest (\(error))")
+    }
 
     do {
         let pty = try spawnShell(rows: 24, cols: 80, shell: "/bin/sh")
@@ -134,7 +215,7 @@ func ptySuite(_ h: Harness) {
 
         ptyWrite(pty.master, Array("exit\n".utf8))
         _ = drain(pty.master)
-        waitpid(pty.pid, nil, 0)
+        reap(pty.pid)
     } catch {
         h.expect(false, "a shell can be given a controlling terminal (\(error))")
     }
@@ -158,7 +239,7 @@ func ptySuite(_ h: Harness) {
         defer { close(pty.master) }
         ptyWrite(pty.master, Array("/bin/pwd; echo NYMBRA_CWD_OK\nexit\n".utf8))
         let text = drain(pty.master)
-        waitpid(pty.pid, nil, 0)
+        reap(pty.pid)
         h.expect(text.contains("/tmp"),
                  "the shell starts where it was told to, not where the application is")
     } catch {
@@ -188,12 +269,16 @@ func ptySuite(_ h: Harness) {
         do {
             let pty = try spawnShell(rows: 24, cols: 80, shell: "/bin/sh")
             defer { close(pty.master) }
-            let marker = "NYMBRA_SPAWN_\(index)_OK"
-            ptyWrite(pty.master, Array("echo \(marker); exit\n".utf8))
-            if readUntil(pty.master, marker: marker, timeout: 5).contains(marker) {
+            // Evaluated, so that the PTY's echo of this command — which contains
+            // the command and not its output — cannot satisfy the check. The
+            // earlier form asked for the marker itself and was answered by the
+            // echo, so it counted eight shells that it had never run anything in.
+            ptyWrite(pty.master, Array("printf 'NYMBRA_SPAWN_%s\\n' \(index)_OK; exit\n".utf8))
+            let text = drain(pty.master, timeout: 5)
+            if text.contains("NYMBRA_SPAWN_\(index)_OK") {
                 started += 1
             }
-            waitpid(pty.pid, nil, 0)
+            reap(pty.pid, timeout: 5)
         } catch {
             h.expect(false, "shell \(index) started at runtime (\(error))")
         }
@@ -209,6 +294,12 @@ func ptySuite(_ h: Harness) {
 // wait for a marker or a process group instead, so a failure is an assertion
 // rather than a hung suite.
 
+/// Is there anything to read within `milliseconds`?
+private func readable(_ master: Int32, within milliseconds: Int32) -> Bool {
+    var descriptor = pollfd(fd: master, events: Int16(POLLIN), revents: 0)
+    return poll(&descriptor, 1, milliseconds) > 0
+}
+
 /// Read until `marker` appears or `timeout` seconds pass.
 private func readUntil(_ master: Int32, marker: String, timeout: Double) -> String {
     var output = [UInt8]()
@@ -216,8 +307,7 @@ private func readUntil(_ master: Int32, marker: String, timeout: Double) -> Stri
     let deadline = Date().addingTimeInterval(timeout)
     while Date() < deadline {
         // Polling first means the blocking read below has something to return.
-        var descriptor = pollfd(fd: master, events: Int16(POLLIN), revents: 0)
-        if poll(&descriptor, 1, 50) > 0 {
+        if readable(master, within: 50) {
             let count = ptyRead(master, into: &chunk)
             if count > 0 {
                 output.append(contentsOf: chunk[0..<count])
@@ -230,11 +320,17 @@ private func readUntil(_ master: Int32, marker: String, timeout: Double) -> Stri
     return String(decoding: output, as: UTF8.self)
 }
 
-/// Read until the shell exits and the PTY reports EOF.
-private func drain(_ master: Int32) -> String {
+/// Read until the shell exits and the PTY reports EOF, or the deadline passes.
+///
+/// Bounded on purpose: a shell that never exits should be a failing assertion,
+/// not a suite that never finishes. Everything the shell produced is returned
+/// either way.
+private func drain(_ master: Int32, timeout: Double = 10) -> String {
     var output = [UInt8]()
     var chunk = [UInt8](repeating: 0, count: 4096)
-    while true {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if !readable(master, within: 50) { continue }
         let count = ptyRead(master, into: &chunk)
         if count <= 0 { break }
         output.append(contentsOf: chunk[0..<count])
@@ -243,13 +339,36 @@ private func drain(_ master: Int32) -> String {
 }
 
 /// Wait for the terminal's foreground process group to satisfy `condition`.
+///
+/// Whatever the terminal produces while this waits is read and discarded. That
+/// is not tidiness, it is what makes the wait possible: the buffer between a
+/// terminal and its reader is about a kilobyte, and a shell that has filled it
+/// blocks *in the middle of drawing its prompt* — after which it never reads the
+/// next command. The application's reader never stops, so this must not either.
 private func waitForGroup(_ master: Int32, timeout: Double,
                           _ condition: (pid_t) -> Bool) -> pid_t? {
     let deadline = Date().addingTimeInterval(timeout)
+    var scratch = [UInt8](repeating: 0, count: 4096)
     while Date() < deadline {
         let group = tcgetpgrp(master)
         if group > 0 && condition(group) { return group }
-        usleep(20_000)
+        if readable(master, within: 20) {
+            let count = ptyRead(master, into: &scratch)
+            if count <= 0 { return nil }        // the shell is gone
+        }
     }
     return nil
+}
+
+/// Reap a child, without waiting for it forever if it will not die.
+@discardableResult
+private func reap(_ pid: pid_t, timeout: Double = 5) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        let result = waitpid(pid, nil, WNOHANG)
+        if result == pid { return true }
+        if result == -1 { return false }
+        usleep(20_000)
+    }
+    return false
 }

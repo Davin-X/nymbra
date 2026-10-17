@@ -1,6 +1,7 @@
 # ADR-0007 — Shells are started with `posix_spawn`, not `forkpty`
 
 **Status:** Accepted · 2026-10-17 · supersedes [ADR-0002](0002-forkpty-before-appkit.md)
+· decision 1 corrected by [ADR-0008](0008-the-helper-owns-the-terminal.md)
 
 ## Context
 
@@ -57,6 +58,20 @@ Three parts of that are load-bearing and were verified rather than assumed:
    already-open descriptor does not do this. Without it the shell runs, prints a
    prompt and echoes what you type, but there is no foreground process group —
    so Ctrl+C does nothing and `tcgetpgrp` answers 0. Nothing on screen says so.
+
+   > **Corrected, 2026-10-17 — this part is false and was replaced by
+   > [ADR-0008](0008-the-helper-owns-the-terminal.md).** The reasoning inverts
+   > the order POSIX specifies: the **file actions run before the spawn
+   > attributes**, so this `addopen` ran while the child was still in the
+   > parent's session, where opening a terminal cannot make it the controlling
+   > one. `POSIX_SPAWN_SETSID` created the session afterwards, leaving exactly
+   > the state described above as the symptom — no foreground process group, no
+   > Ctrl+C, `tcgetpgrp` answering 0 — while the prompt, the echo and the output
+   > all looked perfectly correct. The lesson worth keeping is the shape of the
+   > mistake rather than the detail: the claim and the descriptor are separate
+   > facts, and a test that only asks whether a shell *runs* cannot see this.
+   > ADR-0008 claims an inherited descriptor with `TIOCSCTTY`, in a helper
+   > program that `posix_spawn` execs in place of this `addopen`.
 2. **`POSIX_SPAWN_SETSIGDEF`.** Signals this process ignores are inherited. A GUI
    process commonly ignores `SIGPIPE`, and a shell that inherits that prints
    "broken pipe" where `yes | head -1` should be silent. The job-control signals
@@ -86,6 +101,14 @@ Three parts of that are load-bearing and were verified rather than assumed:
   back, `SIGPIPE` is default, `/bin/pwd` prints the directory the shell was told
   to use, and eight shells start while other threads allocate and initialise
   Foundation types — the situation the old rule existed to avoid.
+
+  > **Partly overstated, corrected by [ADR-0008](0008-the-helper-owns-the-terminal.md).**
+  > The assertions were written and did pass, and they passed for the wrong
+  > reason: `/bin/sh` is bash, and bash *reacquires* a controlling terminal for
+  > itself when it finds it has none. Every shell the application actually
+  > started — zsh among them — had no foreground process group, and no assertion
+  > noticed. The witnesses that cannot rescue themselves (`/bin/sleep`, zsh, and
+  > the exit status of a signal) arrived with ADR-0008.
 - The `--pty-test` flag still runs a real login shell on a real PTY. It prints
   `tty` and `/bin/pwd` as well, so a CI log shows the terminal the shell got and
   the directory it started in.
