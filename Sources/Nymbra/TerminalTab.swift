@@ -21,7 +21,10 @@ final class TerminalTab {
     /// A name the person gave this tab, which is what the strip and the window
     /// then call it. `nil` means "whatever the shell says it is".
     var customTitle: String? {
-        didSet { item?.label = displayName }
+        // The window paints the strip, because a tab's label carries more than
+        // its name — a dot when it has output the person has not looked at — and
+        // only the window knows which tab is in front.
+        didSet { host?.refreshTitle() }
     }
 
     /// The name this tab is known by, in the strip and anywhere else.
@@ -65,6 +68,7 @@ final class TerminalTab {
             guard let view else { return }
             view.needsDisplay = true
             self?.updateTitle()
+            self?.noteOutput()
         }
         terminal.onBell = { NSSound.beep() }
         terminal.onExit = { [weak self] in self?.paneExited(id) }
@@ -180,7 +184,17 @@ final class TerminalTab {
     /// out from under the person reading the tab they chose.
     private func updateTitle() {
         host?.refreshTitle()
-        item?.label = displayName
+    }
+
+    /// This tab printed something.
+    ///
+    /// Whether that makes the tab *unread* is not decided here. A tab is unread
+    /// only relative to the one the person is looking at, and that is the
+    /// window's to know — the same reason the window, not the tab, owns the
+    /// window's title.
+    private func noteOutput() {
+        guard let id = item?.identifier as? TabID else { return }
+        host?.tabDidReceiveOutput(id)
     }
 
     /// The commands still in the foreground here, which is what closing ends.

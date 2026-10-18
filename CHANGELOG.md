@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the unread tab badge
+
+A tab that prints while it is not the one in front now marks itself: a dot on its
+strip label, cleared by looking at the tab. Output you are watching is not news,
+so the tab in front is never marked — which is also why the mark is kept by the
+window rather than by the tab. "Unread" is a claim about the person's attention,
+and only the window knows where that is.
+
+- The mark is drawn in the tab's own label, which is the one piece of a tab a
+  plain `NSTabView` lets us paint, so `make tabs-test` reads it off the strip
+  rather than off a flag beside it: `… unread=1 …`. A dot that was set but never
+  painted would fail that check, which is the point of asking the label.
+- This is the *output* half of the badge. The half the roadmap asks for in M4 — a
+  dot when a background command **finishes**, with its exit status — needs the
+  `OSC 133` shell integration that is not parsed yet, and stays in M4.
+
 ### Added — tabs and split panes
 
 A window can hold several shells now. **Tabs** each own their panes, with a
@@ -23,9 +39,10 @@ click, and `⌘[` / `⌘]` move it between panes without the mouse.
   closed=3 sameShells=1`.
 - The tab commands are asserted without a window by `make tabs-test`:
   `strip=1 plus=1 created=1 ownShells=1 independent=1 switched=1 title=1
-  closed=2 sameShells=1 lastTabClosesWindow=1`.
-- The per-tab **unread badge** is not here: it needs the shell integration that
-  would raise it, which is M4.
+  unread=1 closed=2 sameShells=1 lastTabClosesWindow=1`.
+- The per-tab **unread badge** landed after this, in the same release — see the
+  entry at the top of this section. Its *finished-command* form needs `OSC 133`
+  and stays in M4.
 
 ### Added — search in scrollback
 

@@ -19,6 +19,13 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
     private var tabs: [TabID: TerminalTab] = [:]
     private(set) var focusedTab: TabID
 
+    /// Tabs that have printed something since they were last in front.
+    ///
+    /// Kept by the window rather than by each tab, because "unread" is a claim
+    /// about the person's attention: a tab is unread only relative to the one
+    /// they are looking at, and only the window knows which that is.
+    private var unread: Set<TabID> = []
+
     private static let firstTab = TabID(0)
 
     /// The item in the strip that is not a tab.
@@ -135,7 +142,12 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
 
         tabs[id] = tab
         attach(tab, id: id)
-        tabView.selectTabViewItem(withIdentifier: id)
+        // Selected through `selectTab` rather than the tab view directly: the
+        // delegate callback is not guaranteed to run synchronously, and until it
+        // does the focused tab is still the old one — so the new shell's first
+        // prompt would arrive while this tab was still "in the back" and dot
+        // itself, which would put a mark on the tab the person just opened.
+        selectTab(id)
         return true
     }
 
@@ -152,6 +164,10 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         guard let tab = tabs[id] else { return }
         for pane in tab.panes.values { pane.terminal.terminate() }
         tabs.removeValue(forKey: id)
+        // A closed tab cannot be unread. The identity is never reused, so this is
+        // tidiness rather than correctness, but a set that only grows is a set
+        // that eventually lies about its size.
+        unread.remove(id)
 
         let index = tabView.indexOfTabViewItem(withIdentifier: id)
         if index >= 0 {
@@ -163,8 +179,10 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
             // selecting that would make a tab when the person meant to see one.
             let remaining = tabIDs.filter { $0 != id }
             let position = (tabIDs.firstIndex(of: id) ?? 0)
-            focusedTab = remaining[min(position, remaining.count - 1)]
-            tabView.selectTabViewItem(withIdentifier: focusedTab)
+            // The tab that comes forward is read on the way in, like any other
+            // switch to it — and `selectTab` sets the focus itself, rather than
+            // waiting for a delegate callback that may be late.
+            selectTab(remaining[min(position, remaining.count - 1)])
         } else {
             window.performClose(nil)
         }
@@ -182,15 +200,13 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
     func selectNextTab() {
         let ids = tabIDs
         guard ids.count > 1, let index = ids.firstIndex(of: focusedTab) else { return }
-        focusedTab = ids[(index + 1) % ids.count]
-        tabView.selectTabViewItem(withIdentifier: focusedTab)
+        selectTab(ids[(index + 1) % ids.count])
     }
 
     func selectPreviousTab() {
         let ids = tabIDs
         guard ids.count > 1, let index = ids.firstIndex(of: focusedTab) else { return }
-        focusedTab = ids[(index - 1 + ids.count) % ids.count]
-        tabView.selectTabViewItem(withIdentifier: focusedTab)
+        selectTab(ids[(index - 1 + ids.count) % ids.count])
     }
 
     /// Bring a tab to the front.
@@ -201,6 +217,7 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
     /// method that shows the wrong tab when the callback is late.
     func selectTab(_ id: TabID) {
         focusedTab = id
+        markRead(id)
         tabView.selectTabViewItem(withIdentifier: id)
     }
 
@@ -257,11 +274,58 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
     func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
         guard let id = tabViewItem?.identifier as? TabID else { return }
         focusedTab = id
+        markRead(id)
         tabs[id]?.host = self
         window.makeFirstResponder(tabs[id]?.focusedView)
         // The title belongs to the tab in front of the person, which is not
         // necessarily the tab that last printed something.
         refreshTitle()
+    }
+
+    // MARK: - Unread
+
+    /// A tab printed something.
+    ///
+    /// Marked only when it is not the tab in front: output the person is watching
+    /// is not news, and a dot on the tab they are reading is noise. The mark is
+    /// cleared by looking at the tab, which is the same act as bringing it
+    /// forward.
+    func tabDidReceiveOutput(_ id: TabID) {
+        guard id != focusedTab else { return }
+        guard unread.insert(id).inserted else { return }
+        updateLabel(for: id)
+    }
+
+    /// Whether a tab has printed something since it was last in front. The strip
+    /// draws a dot for exactly this, and a name change repaints it, so it is a
+    /// question about what the person has seen rather than about the shell.
+    func isUnread(_ tab: TabID) -> Bool { unread.contains(tab) }
+
+    /// Looking at a tab reads it.
+    private func markRead(_ id: TabID) {
+        guard unread.remove(id) != nil else { return }
+        updateLabel(for: id)
+    }
+
+    /// The strip's label for one tab: its name, and a dot when it has printed
+    /// something the person has not seen.
+    ///
+    /// The dot lives in the label rather than beside it because the strip is a
+    /// plain `NSTabView` and its label is the one piece of a tab it lets us
+    /// paint. Composing it here — and only here — is what keeps a rename from
+    /// silently clearing the mark.
+    private func updateLabel(for id: TabID) {
+        guard let tab = tabs[id] else { return }
+        tab.item?.label = unread.contains(id) ? "\(tab.displayName) •" : tab.displayName
+    }
+
+    /// Paint every tab's label.
+    ///
+    /// Cheap — a window has a handful of tabs — and cheaper to reason about than
+    /// tracking which label moved: a label depends on the tab's name and on
+    /// whether it is unread, and either can change without the other.
+    private func updateAllLabels() {
+        for id in tabs.keys { updateLabel(for: id) }
     }
 
     // MARK: - Tab context menu
@@ -393,7 +457,7 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         let title = pane.terminal.isRunning ? pane.title : "Nymbra \u{2014} shell exited"
         window.title = title.isEmpty ? "Nymbra" : title
         window.subtitle = tab.layout.count > 1 ? "\(tab.layout.count) panes" : ""
-        tab.item?.label = tab.displayName
+        updateAllLabels()
     }
 
     // MARK: - NSWindowDelegate

@@ -142,7 +142,7 @@ jobs:
           cat tabs.out
           grep -q "strip=1 plus=1 created=1 ownShells=1 independent=1 switched=1 " tabs.out \
             || { echo "::error::tabs did not work"; exit 1; }
-          grep -q "title=1 closed=2 sameShells=1 lastTabClosesWindow=1" tabs.out \
+          grep -q "title=1 unread=1 closed=2 sameShells=1 lastTabClosesWindow=1" tabs.out \
             || { echo "::error::tabs did not work"; exit 1; }
           echo "Tabs passed"
 

@@ -62,6 +62,7 @@ visible rather than discovered later.
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
 | Settings: theme, font, colours, cursor, keybindings | ✅ one JSON file, a settings window with live preview, and a readable palette | M2 |
 | Shell integration: prompt/command boundaries, notifications | ⚠️ bell sounds; `OSC 133` not parsed | M4 |
+| Per-tab unread badge | ✅ a tab marks itself with a dot when it prints in the background, cleared by looking at it; the "command finished" form needs `OSC 133`, and stays in M4 | M4 |
 | Session recovery/persistence | ❌ | M5 |
 | Colour legibility for program-chosen colours | ✅ `Palette.readable` lifts any foreground below 4.5:1 | — |
 
@@ -144,8 +145,8 @@ shells that look correct cannot answer the question, and the witness that can is
 **Done**
 - **Tabs**, with a visible tab strip, each tab holding its own panes, and a title
   that follows the focused shell — `⌘⇧T`, `⌘⇧W`, `⌘⇧[` / `⌘⇧]`. The per-tab
-  **unread badge** is deferred to M4, where the shell integration that sets it
-  lands.
+  **unread badge** followed in M3 (a dot while a tab prints in the background);
+  its finished-command form needs `OSC 133` and stays in M4.
 - **Horizontal and vertical splits** — `⌘D` and `⌘⇧D`, closed with `⌘W`, resized
   with the window.
 - **Focus follows a click**, and `⌘[` / `⌘]` move it between panes.
@@ -254,7 +255,10 @@ Where Nymbra becomes something other terminals are not.
 **Scope**
 - **OSC 133** shell integration: prompt start, command start, command
   executed, exit status — emitted by a `zsh`/`bash`/`fish` snippet
-- Per-tab **unread badge** when a command finishes in a background tab
+- Per-tab **unread badge** when a command finishes in a background tab — the
+  *output* form has landed (a tab marks itself with a dot while printing in the
+  background, cleared by looking at it); the *finished* form needs the `OSC 133`
+  above, so it needs the prompt boundaries first
 - **Notification** when a long command finishes; click to focus the tab
 - **Command timeline**: searchable history of every command, its exit status,
   duration and directory, stored locally
