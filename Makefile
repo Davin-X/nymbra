@@ -3,7 +3,7 @@
 # asking *inside* a recipe can race the build that just finished.
 bin = $(shell swift build -c release --show-bin-path 2>/dev/null)
 
-.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test tabs-test mouse-test lint architecture check clean
+.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test tabs-test mouse-test shell-integration-test lint architecture check clean
 
 help:
 	@echo "make build       - release build"
@@ -20,6 +20,7 @@ help:
 	@echo "make window-test - close a window, get a working one back"
 	@echo "make tabs-test   - make, switch and close tabs without a window"
 	@echo "make mouse-test  - mouse reporting bytes, asserted headlessly"
+	@echo "make shell-integration-test - a real zsh, reporting what it is doing"
 	@echo "make check       - everything CI's check job runs (guard + build + tests + proofs)"
 	@echo "make clean       - remove build output"
 
@@ -99,7 +100,12 @@ tabs-test: build
 mouse-test: build
 	"$(bin)/Nymbra" --mouse-test
 
-check: architecture test pty-test screen-test resize-test window-test tabs-test mouse-test
+# Shell integration, asserted against a real zsh: the marks a terminal needs,
+# and the user's own startup file still running. Nothing is shown.
+shell-integration-test: build
+	"$(bin)/Nymbra" --shell-integration-test
+
+check: architecture test pty-test screen-test resize-test window-test tabs-test mouse-test shell-integration-test
 
 clean:
 	swift package clean

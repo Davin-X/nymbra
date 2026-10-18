@@ -61,7 +61,7 @@ visible rather than discovered later.
 | Text reflow on resize | ✅ live screen and history rewrap on resize; soft-wrapped rows are rejoined and rewrapped | — |
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
 | Settings: theme, font, colours, cursor, keybindings | ✅ one JSON file, a settings window with live preview, and a readable palette | M2 |
-| Shell integration: prompt/command boundaries, notifications | ⚠️ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events; the snippets that emit them, and the badge, notification and timeline built on them, remain | M4 |
+| Shell integration: prompt/command boundaries, notifications | ⚠️ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events, and a bundled zsh integration emits `A`/`C`/`D`; `B`, the opt-in setting, `bash`/`fish`, and the badge, notification and timeline built on the marks remain | M4 |
 | Per-tab unread badge | ✅ a tab marks itself with a dot when it prints in the background, cleared by looking at it; the "command finished" form needs the `OSC 133` marks, which now parse | M4 |
 | Session recovery/persistence | ❌ | M5 |
 | Colour legibility for program-chosen colours | ✅ `Palette.readable` lifts any foreground below 4.5:1 | — |
@@ -254,8 +254,9 @@ Where Nymbra becomes something other terminals are not.
 
 **Scope**
 - **OSC 133** shell integration: prompt start, command start, command
-  executed, exit status — the marks are parsed into `ShellMark` events; the
-  `zsh`/`bash`/`fish` snippet that emits them is next
+  executed, exit status — the marks are parsed into `ShellMark` events, and a
+  bundled zsh integration emits them (so far `A`/`C`/`D`: see the changelog for
+  why `B` waits, and `bash`/`fish` with it)
 - Per-tab **unread badge** when a command finishes in a background tab — the
   *output* form has landed (a tab marks itself with a dot while printing in the
   background, cleared by looking at it); the *finished* form needs the `OSC 133`

@@ -40,9 +40,11 @@ public final class Terminal {
     public init(
         size: GridSize,
         shell: String? = nil,
-        deliveryQueue: DispatchQueue = .main
+        deliveryQueue: DispatchQueue = .main,
+        integration: ShellIntegration? = nil
     ) throws {
-        let pty = try spawnShell(rows: size.rows, cols: size.cols, shell: shell)
+        let pty = try spawnShell(rows: size.rows, cols: size.cols, shell: shell,
+                                 integration: integration)
         let screen = Screen(rows: size.rows, cols: size.cols)
         self.master = pty.master
         self.pid = pty.pid
