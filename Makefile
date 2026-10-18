@@ -3,12 +3,12 @@
 # asking *inside* a recipe can race the build that just finished.
 bin = $(shell swift build -c release --show-bin-path 2>/dev/null)
 
-.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test tabs-test check clean
+.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test tabs-test mouse-test lint architecture check clean
 
 help:
 	@echo "make build       - release build"
 	@echo "make test        - run the test harness"
-	@echo "make lint        - run SwiftLint (requires swiftlint)"
+	@echo "make lint        - run SwiftLint, if it is installed (not part of check)"
 	@echo "make run         - build and open Nymbra from the terminal"
 	@echo "make app         - build Nymbra.app, with its icon"
 	@echo "make launch      - build Nymbra.app and open it from Finder"
@@ -20,14 +20,32 @@ help:
 	@echo "make window-test - close a window, get a working one back"
 	@echo "make tabs-test   - make, switch and close tabs without a window"
 	@echo "make mouse-test  - mouse reporting bytes, asserted headlessly"
-	@echo "make check       - everything CI runs (build + tests + headless proofs)"
+	@echo "make check       - everything CI's check job runs (guard + build + tests + proofs)"
 	@echo "make clean       - remove build output"
 
 build:
 	swift build -c release
 
+# SwiftLint is deliberately not part of `check`, and not part of CI either: the
+# job that ran it was removed and `.swiftlint.yml` went with it. The target stays
+# for anyone who keeps their own config, but a *strict* lint with no config fails
+# on a codebase that never adopted the default rules — which made `make check`
+# red on any machine that happened to have swiftlint installed, and red for a
+# different reason (`sourcekitdInProc` failing to load under Command Line Tools
+# alone) on any machine that had it but no full Xcode. Neither is a statement
+# about this code.
 lint:
-	swiftlint lint --strict
+	@if command -v swiftlint >/dev/null 2>&1; then \
+		swiftlint lint --strict; \
+	else \
+		echo "swiftlint not installed; skipping (add one and 'make lint' will run it)"; \
+	fi
+
+# The guard CI runs first. The core targets must stay UI-free, and until this was
+# a prerequisite of `check` the promise in `make help` — that `check` runs what CI
+# runs — was not quite true.
+architecture:
+	@Scripts/check-architecture.sh
 
 # `build` first, deliberately: the suite starts real shells, and the program
 # that gives a shell its terminal (NymbraSpawn) is looked for beside the binary
@@ -81,7 +99,7 @@ tabs-test: build
 mouse-test: build
 	"$(bin)/Nymbra" --mouse-test
 
-check: lint test pty-test screen-test resize-test window-test tabs-test mouse-test
+check: architecture test pty-test screen-test resize-test window-test tabs-test mouse-test
 
 clean:
 	swift package clean
