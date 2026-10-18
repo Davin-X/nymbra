@@ -94,6 +94,11 @@ took is not visible in a terminal's output: a prompt and a command's output are
 the same bytes, and only the shell itself knows where one ended and the other
 began.
 
+Clicking the notification brings that tab to the front. It appears even while
+Nymbra is the active application, which the system does not do by default — the
+case this is for is a command finishing in a tab behind the one you are looking
+at. If the tab has been closed by the time you click, nothing happens.
+
 ## keyboard
 
 | Key | Type | Default | Notes |

@@ -48,7 +48,7 @@ and only the part that needs a screen lives in the app.
 | `CGColor` conversion, SGR → colours | `Nymbra/Theme.swift` | The only part that needs a graphics context |
 | Font resolution and metrics | `Nymbra/Fonts.swift` | CoreText, and shared by the grid and the preview so they cannot disagree |
 | Grid drawing, selection highlight, clipboard | `Nymbra/TermView.swift` | The renderer |
-| Windows, settings UI, menu bar | `Nymbra/AppController.swift`, `TerminalWindow.swift`, `SettingsWindow.swift`, `AppMenu.swift` | AppKit, and deliberately thin |
+| Windows, settings UI, menu bar, notification clicks | `Nymbra/AppController.swift`, `TerminalWindow.swift`, `SettingsWindow.swift`, `AppMenu.swift`, `Notifications.swift` | AppKit, and deliberately thin |
 | Claiming a shell's terminal | `NymbraSpawn/main.c`, `NymbraCore/PTY.swift` | It is `ioctl` and `exec`: the one thing `posix_spawn` cannot express, so it is its own program (ADR-0008) |
 
 ### The dependency rule
@@ -145,6 +145,9 @@ zsh snippet ──OSC 133──▶  VT parser ──▶ Terminal.onShellMark
                                               │  an Announcement
                                               ▼
                                         TerminalWindow.deliver ──▶ Notification Centre
+                                                                        │  a click
+                                                                        ▼
+                                                          NotificationRouter ──▶ the tab
 ```
 
 Marks cross the same delivery queue as screen updates, so `onShellMark` fires on
@@ -153,11 +156,19 @@ cannot know — whether the tab is in front, in the key window, in an active
 application, and what the tab is called — is gathered in `TerminalWindow`. What it
 needs that is arithmetic lives in `CommandAttention`, with no AppKit in sight.
 
+The click at the end of that path is the other thing the notification daemon owns,
+so it is arranged the same way: the tab travels inside the notification as an
+integer, `NotificationRouter.handle(userInfo:)` turns it back into a `TabID`, and
+`AppController.focus(tab:)` finds the window holding it. A notification outlives
+what it is about, so a tab that has since been closed is an ordinary answer rather
+than an error.
+
 Delivery is deliberately the one part with no test. `UNUserNotificationCenter`
 *aborts* outside an application bundle rather than returning an error — which is
 what the test binary and `swift run` are — so `deliver` is a seam with a real
-default that the tests replace. The alternative is a rule that could only be
-checked by a human watching for a banner.
+default that the tests replace, and both ends of the click are values the tests
+build and hand back. The alternative is a rule that could only be checked by a
+human watching for a banner.
 
 ## Invariants
 
@@ -243,7 +254,7 @@ ADR-0001.
 | Controlling terminal and job control | `PTYSuite` asks the kernel, headlessly: `tcgetpgrp` for the shell, a job's own process group, whether Ctrl+C ends it and hands the terminal back, and whether a program that never touches its terminal has one |
 | Emulation, end to end | `--screen-test` feeds real shell output through the parser in CI |
 | Shell integration | Unit tests on the generated files and the parser, plus `--shell-integration-test` against a real zsh |
-| Attention: is a finished command worth announcing, and how long did it take | Unit tests on `CommandAttention`/`CommandTimer`, plus `--notify-test` against a real zsh for the wiring — the decision is pure, the delivery is not testable at all |
+| Attention: is a finished command worth announcing, and how long did it take | Unit tests on `CommandAttention`/`CommandTimer`, plus `--notify-test` against a real zsh for the wiring — the decision is pure, the delivery is not testable at all, and both ends of a click are values a test can hand back and forth |
 | Menu bar | `--menu-test` prints the menu and its key equivalents |
 | Rendering | Manual + snapshot once Metal lands |
 

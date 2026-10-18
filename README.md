@@ -187,7 +187,7 @@ Full detail, including the threading model and the invariants that must hold:
 | M2 | Settings, configuration, palettes, select and copy | ✅ complete |
 | M1.x | Tabs and splits | ✅ done |
 | M3 | Metal renderer, search, reflow, mouse | 🔨 search, reflow and mouse done; Metal renderer next |
-| M4 | Shell integration (OSC 133) and notifications | 🔨 zsh marks behind an off-by-default setting, and a long command that finishes out of sight is announced; click-to-focus, `bash`/`fish` and the timeline next |
+| M4 | Shell integration (OSC 133) and notifications | 🔨 zsh marks behind an off-by-default setting; a long command that finishes out of sight is announced and the click brings its tab forward; `bash`/`fish` and the timeline next |
 | M5 | Sessions: a PTY host that outlives the window | planned |
 | M6 | Signed, notarized release and updater | ⏳ bundle and icon done; signing remains |
 

@@ -354,6 +354,19 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         deliver(announcement, id)
     }
 
+    /// Bring one of this window's tabs to the front, if it still has it.
+    ///
+    /// A notification outlives the tab it is about: a command can finish, and the
+    /// tab be closed, before anybody gets round to clicking. So both answers are
+    /// ordinary — what is *not* allowed is selecting a tab that is gone, which is
+    /// why the id is checked here rather than left to the tab view.
+    @discardableResult
+    func focus(tab id: TabID) -> Bool {
+        guard tabs[id] != nil else { return false }
+        selectTab(id)
+        return true
+    }
+
     /// Whether this tab is one the person is looking at: the tab in front, in the
     /// key window, in the active application.
     ///
@@ -396,17 +409,28 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
             center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
 
-        let content = UNMutableNotificationContent()
-        content.title = announcement.title
-        content.body = announcement.body
         // Unique per announcement so that two finished builds are two
         // notifications rather than one that replaces the other.
         let request = UNNotificationRequest(
             identifier: "nymbra.command.\(id.raw).\(UUID().uuidString)",
-            content: content,
+            content: content(for: announcement, tab: id),
             trigger: nil
         )
         center.add(request)
+    }
+
+    /// What a notification about a tab looks like, before it is posted.
+    ///
+    /// Built apart from `post` because the part a click depends on — the tab
+    /// carried inside it — is then a value a test can hold and hand back, rather
+    /// than one that exists only inside a notification nobody is going to click.
+    static func content(for announcement: CommandAttention.Announcement,
+                        tab: TabID) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = announcement.title
+        content.body = announcement.body
+        content.userInfo = NotificationPayload.userInfo(for: tab)
+        return content
     }
 
     /// Whether this process has already asked for permission to notify. Main

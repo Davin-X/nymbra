@@ -712,13 +712,17 @@ func runNotifyTest() -> Bool { // swiftlint:disable:this function_body_length
         FileHandle.standardError.write(Data("nymbra: notify-test spawn failed: \(error)\n".utf8))
     }
 
-    /// What the window would have posted.
+    /// What the window would have posted, in full — the announcement itself, not
+    /// just the text of it, because what a click carries is the announcement's tab
+    /// and the click path below has to be given the real thing.
     final class Postbox {
-        private(set) var lines: [String] = []
-        private(set) var tabs: [TabID] = []
+        private(set) var sent: [(announcement: CommandAttention.Announcement, tab: TabID)] = []
+
+        var lines: [String] { sent.map { "\($0.announcement.title): \($0.announcement.body)" } }
+        var tabs: [TabID] { sent.map(\.tab) }
+
         func note(_ announcement: CommandAttention.Announcement, for tab: TabID) {
-            lines.append("\(announcement.title): \(announcement.body)")
-            tabs.append(tab)
+            sent.append((announcement, tab))
         }
     }
     let postbox = Postbox()
@@ -784,12 +788,50 @@ func runNotifyTest() -> Bool { // swiftlint:disable:this function_body_length
     pump(2.5)
     let silencedQuiet = postbox.lines.count == beforeSilence
 
+    // 5. The click. A click only exists when somebody clicks, and the object the
+    //    daemon hands over — a `UNNotificationResponse` — cannot be constructed by
+    //    anything but the daemon. So both *ends* of the path are asserted instead:
+    //    the tab a notification carries, built here the way the window builds it,
+    //    and what happens to it when it comes back.
+    //
+    //    `start()` is the application's own path into this, which is why it is
+    //    called rather than `makeWindow()`: it installs the notification delegate,
+    //    and outside an application bundle that must not touch the notification
+    //    centre at all. Reaching the next line is the assertion.
+    let controller = AppController(configuration: silenced)
+    guard let target = controller.start(), target.newTab() else {
+        print("notify-test\tFAIL: no window to bring a tab forward in")
+        return false
+    }
+    let targetTabs = target.tabView.tabViewItems.compactMap { $0.identifier as? TabID }
+    guard targetTabs.count == 2, let behind = targetTabs.first(where: { $0 != target.focusedTab }) else {
+        print("notify-test\tFAIL: expected two tabs to click between, found \(targetTabs.count)")
+        return false
+    }
+
+    let router = NotificationRouter()
+    router.focus = { [weak controller] tab in controller?.focus(tab: tab) ?? false }
+    // The announcement the window really produced in step 1, put into a
+    // notification as the window would put it, so what the click carries is what
+    // the app carries rather than something the test assembled.
+    guard let real = postbox.sent.first else {
+        print("notify-test\tFAIL: nothing was announced to click on")
+        return false
+    }
+    let posted = TerminalWindow.content(for: real.announcement, tab: behind)
+    let clicked = router.handle(userInfo: posted.userInfo)
+    let cameForward = clicked && target.focusedTab == behind
+    let nonsenseIgnored = !router.handle(userInfo: ["tab": "not a tab"])
+    let strangerIgnored = !controller.focus(tab: TabID(9_999))
+
     print("notify-test\tannounced=\(announced ? 1 : 0) "
         + "measured=\(measured ? 1 : 0) "
         + "tab=\(namedTheTab ? 1 : 0) "
         + "failed=\(failed && failedSaidSo ? 1 : 0) "
         + "quiet=\(quiet ? 1 : 0) "
-        + "off=\(silencedQuiet ? 1 : 0)")
+        + "off=\(silencedQuiet ? 1 : 0) "
+        + "click=\(cameForward ? 1 : 0) "
+        + "ignored=\(nonsenseIgnored && strangerIgnored ? 1 : 0)")
     if !announced {
         print("notify-test\tsaw=\(postbox.lines)")
     }
@@ -799,7 +841,11 @@ func runNotifyTest() -> Bool { // swiftlint:disable:this function_body_length
     for tab in tabs {
         for pane in window.panes(in: tab).values { pane.terminal.terminate() }
     }
-    return announced && measured && namedTheTab && failed && failedSaidSo && quiet && silencedQuiet
+    for tab in targetTabs {
+        for pane in target.panes(in: tab).values { pane.terminal.terminate() }
+    }
+    return announced && measured && namedTheTab && failed && failedSaidSo && quiet
+        && silencedQuiet && cameForward && nonsenseIgnored && strangerIgnored
 }
 
 /// What the terminal actually saw, for the failure that needs it.
