@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — a stray terminal recording that had been committed
+
+`typescript` was a 481-byte `script(1)` recording of a shell session, swept into a
+commit by a `git add -A` (in `90a0654`). It was not source, nothing referenced it,
+and it carried a local prompt and a path. It is gone from the tip, and `.gitignore`
+now ignores `typescript` so that running `script` in the checkout cannot commit one
+again.
+
+It is still in history, deliberately: `main` is not rewritten, and a force-push to
+erase 481 bytes of terminal escape codes would cost more than it is worth.
+
 ### Added — the command travels with the shell's mark
 
 `OSC 133 ; C` said "a command is about to run" and nothing about which. It now

@@ -16,3 +16,6 @@ Nymbra.app
 
 # generated app bundles, icons and zips
 build/
+
+# a terminal session recording, if `script` is ever run from the checkout
+typescript
