@@ -123,8 +123,11 @@ of its own settings file.
 | `make pty-test` | Headless proof that a login shell runs on a PTY |
 | `make screen-test` | Feed real output through the parser and dump the screen |
 | `make resize-test` | Proof that the view and the shell agree on the grid |
-| `make window-test` | Close a window and get a working shell back |
+| `make window-test` | Close a window, get a working shell back, and check the floor under the window |
 | `make tabs-test` | A tab strip, including tab reordering, independent switching and closing |
+| `make palette-test` | The command palette, driven with real key events |
+| `make find-test` | Find, including the highlight the view actually draws |
+| `make settings-test` | The settings window and the shortcut recorder's rules |
 | `make mouse-test` | Mouse reporting bytes, asserted headlessly |
 | `make shell-integration-test` | A real zsh, reporting what it is doing |
 | `make notify-test` | A long command in a background tab, announced |
@@ -140,7 +143,9 @@ asserted in text rather than by eye:
 | `--screen-debug "<cmd>"` | The same screen with blanks shown as `·` |
 | `--theme-test` | Every preset, and the contrast of every colour in it |
 | `--menu-test` | The menu bar and its key equivalents |
-| `--settings-test` | The settings window's pages and what each control loaded |
+| `--settings-test` | The settings window's pages, gallery, and the recorder's rules and lifetime |
+| `--palette-test` | The palette's rows, highlight, arrows, Return and Escape |
+| `--find-test` | The find bar's state, and the pixels of the highlight it draws |
 | `--resize-test` | The grid the view reports against the grid the shell is told |
 
 `make check` is the gate: it must pass before any change is considered done.

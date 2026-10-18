@@ -335,11 +335,11 @@ final class AppController: NSObject {
     }
 
     @objc func findNext(_ sender: Any?) {
-        activeWindow?.focusedView?.findNext()
+        activeWindow?.findNext()
     }
 
     @objc func findPrevious(_ sender: Any?) {
-        activeWindow?.focusedView?.findPrevious()
+        activeWindow?.findPrevious()
     }
 
     @objc func increaseFontSize(_ sender: Any?) {

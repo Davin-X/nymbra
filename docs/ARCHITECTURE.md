@@ -261,6 +261,7 @@ ADR-0001.
 | Escape-sequence state machine | Unit tests in `NymbraCheck` |
 | Keyboard mapping | Unit tests in `NymbraCheck`; the mapping is a UI-free target |
 | Viewport and scrollback | Unit tests on `Screen.displayRows` |
+| Where the viewport starts, in absolute rows | Unit tests on `Screen.viewportFirstRow` against `displayRows` at five scroll offsets, and the find highlight's pixels in `--find-test` — the model's row number and the drawn cell have to agree |
 | Screen model | Unit tests, including resize and scrollback |
 | Parser conformance | Input bytes → expected cells, asserted from `NymbraCheck` |
 | Settings model | Unit tests, including hostile config files that must still start |
@@ -273,7 +274,10 @@ ADR-0001.
 | Shell integration | Unit tests on the generated files and the parser, plus `--shell-integration-test` against a real zsh |
 | Attention: is a finished command worth announcing, and how long did it take | Unit tests on `CommandAttention`/`CommandTimer`, plus `--notify-test` against a real zsh for the wiring — the decision is pure, the delivery is not testable at all, and both ends of a click are values a test can hand back and forth |
 | Menu bar | `--menu-test` prints the menu and its key equivalents |
-| Rendering | Manual + snapshot once Metal lands |
+| Command palette | `--palette-test`, driving it with real key events: a text field's own `keyDown` never sees an arrow while the field is being edited, so the keys have to be sent the way the application sends them |
+| Find: the bar's state, and the highlight under it | `--find-test` reads the state back from the bar and judges the highlight by pixels — off, on, off — because a highlight drawn where the text is then painted over it leaves every value in this table correct and the screen blank |
+| Settings window: pages, gallery, recorder rules, recorder lifetime | `--settings-test` asserts rather than prints |
+| Rendering | Manual, plus the find highlight's pixels in `--find-test`; a snapshot suite once Metal lands |
 
 `make check` runs everything that can run without a human.
 

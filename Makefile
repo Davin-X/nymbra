@@ -98,6 +98,25 @@ window-test: build
 
 tabs-test: build
 	"$(bin)/Nymbra" --tabs-test
+
+# The command palette, driven with real key events. That is the point of it: a
+# text field's own `keyDown` is never called while the field is being edited, so
+# a palette that reads its arrows there is a palette whose arrows do nothing.
+# It also used to throw before drawing its first row, which no review caught.
+palette-test: build
+	"$(bin)/Nymbra" --palette-test
+
+# Find, end to end: a real shell prints, the bar is typed into, and the highlight
+# is judged by the pixels the view draws rather than by its own bookkeeping —
+# which is how a highlight drawn a screenful from its match was found.
+find-test: build
+	"$(bin)/Nymbra" --find-test
+
+# The settings window: what each control loaded, the shortcut recorder's rules,
+# and that closing the window releases the event monitor it installs.
+settings-test: build
+	"$(bin)/Nymbra" --settings-test
+
 mouse-test: build
 	"$(bin)/Nymbra" --mouse-test
 
@@ -112,7 +131,7 @@ shell-integration-test: build
 notify-test: build
 	"$(bin)/Nymbra" --notify-test
 
-check: architecture test pty-test screen-test resize-test window-test tabs-test mouse-test shell-integration-test notify-test
+check: architecture test pty-test screen-test resize-test window-test tabs-test palette-test find-test settings-test mouse-test shell-integration-test notify-test
 
 clean:
 	swift package clean

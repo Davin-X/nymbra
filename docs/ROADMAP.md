@@ -56,12 +56,12 @@ visible rather than discovered later.
 |---|---|---|
 | Copy/paste | ✅ selection (click, word, line, drag), Cmd+C and Cmd+V with bracketed paste | — |
 | Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen | — |
-| Search in scrollback | ✅ toolbar search field, next/previous, matches highlighted in history and the live screen | — |
+| Search in scrollback | ✅ a find bar (`⌘F`) over the terminal — query, match count, `↑` `↓`, `×` — with next/previous, the query following the focused tab, and matches highlighted both in the live screen and in history; asserted by the pixels the view draws (`--find-test`), because a highlight nobody can see is invisible to every other kind of test | M3 |
 | Tabs and split panes | ✅ tabs can be reordered; right-click offers tab actions | M1.x (P0) |
 | Text reflow on resize | ✅ live screen and history rewrap on resize; soft-wrapped rows are rejoined and rewrapped | — |
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
 | Settings: theme, font, colours, cursor, keybindings | ✅ navigable pages, live preview, shortcut recording, custom executable shell paths, and a readable palette | M2 |
-| Command palette | ✅ searchable commands, keyboard navigation, and live shortcut labels | M3 |
+| Command palette | ✅ searchable commands, keyboard navigation, and live shortcut labels, driven in the proof with the key events a person sends (`--palette-test`) | M3 |
 | Shell integration: prompt/command boundaries, notifications | ⚠️ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events, a bundled zsh integration emits `A`/`C`/`D`, `behaviour.shellIntegration` turns it on, and a long command that finished in a tab you were not looking at is announced (`behaviour.notifyAfterSeconds`) and brings that tab forward when clicked, and `C` carries the command line as it was typed; `B`, the settings-window toggle, `bash`/`fish`, the timeline and the digest remain | M4 |
 | Per-tab unread badge | ✅ a tab marks itself with a dot when it prints in the background, cleared by looking at it — which already covers a finished command, since the shell draws a new prompt when one ends | M4 |
 | Session recovery/persistence | ❌ | M5 |

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the palette threw, and find highlighted nothing
+
+- **The command palette crashed the application the first time it was opened.**
+  Each row's width was constrained to the list *before* the row had joined it, and
+  activating a constraint between two views with no common ancestor throws — so
+  `⌘⇧P` threw from the palette's own constructor, on the keystroke that opens it,
+  before a single row was drawn. The constraint is made after the row is added.
+  `--palette-test` is what found it: a proof that presses the key is a proof that
+  runs what the key runs.
+- **Find scrolled to a match and drew nothing at it.** A match is recorded as an
+  absolute row — scrollback included — and was moved into the viewport by a formula
+  that added the screen's height instead of subtracting the scroll. Every match on
+  the live screen therefore mapped one screen *below* the viewport, where the
+  bounds check discarded it; with the screen scrolled back, the same error put the
+  highlight on the wrong row. The conversion now goes through
+  `Screen.viewportFirstRow`, the one number `displayRows` lays the text out with,
+  so the two cannot drift apart again. It is asserted on the model at five scroll
+  offsets (`ViewportSuite`) and on the pixels (`--find-test`).
+- **A window that could be shrunk to nothing.** The window now declares a minimum
+  content size. `--window-test` shows the view exactly that size and requires a
+  grid of at least 30×10, because a shell told it has one column wraps every line
+  it prints into a strip one character wide.
+
 ### Added — a command palette, recorded shortcuts and a useful tab strip
 
 - **Command Palette** (`⌘⇧P`) searches Nymbra's commands, shows their current
@@ -17,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   executable file; the selected shell is used for new sessions.
 - **Tabs** can be reordered by dragging one onto another, keeping the `+` item
   at the end and preserving the selected terminal.
-- **Find** is available from a visible toolbar search field as well as `⌘F`;
-  Escape closes it, and the existing next/previous commands continue to work.
+- **Find** is a bar over the terminal — query, match count, `↑` `↓`, `×` — opened
+  by `⌘F` and gone on Escape. The query belongs to the pane in front, so switching
+  tabs switches searches with it, and next/previous keep their commands.
 - Settings now follow the concept's page order: Appearance, Keyboard, Shell,
   Behaviour and Advanced. The Appearance page groups preview, fonts and theme
   presets; Advanced contains colour overrides and configuration access. Keyboard
@@ -30,8 +54,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `↑ ↓`, Return and Escape work. Recording a shortcut also stops when the settings
   window closes, so an abandoned recording cannot swallow Escape application-wide.
 - `--palette-test` drives the palette with real key events: the rows it lists for
-  a query, the row that is highlighted, Return running it, and Escape closing it.
-  `--window-test` does the same for the find field, against a live shell.
+  a query, the shortcut label on each, the row that is highlighted, `↑`/`↓` moving
+  the highlight, Return running the highlighted row, and Escape closing it.
+- `--find-test` does the same for the find bar against a live shell — type, count,
+  next, previous, Escape, reopening, and following the focus between tabs — and
+  then judges the *highlight* by pixels: find off, find on, find off. The third
+  render has to be byte-identical to the first, so the highlight is proven drawn
+  and proven cleared rather than believed.
+- `--settings-test` now asserts instead of printing: the gallery is filled, the
+  recorder refuses an unmodified key and a combination another command owns (named
+  in the warning), records a free one, and stops recording when its window closes.
 
 ### Removed — a stray terminal recording that had been committed
 

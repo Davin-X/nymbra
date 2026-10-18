@@ -122,8 +122,8 @@ jobs:
           wait "$pid" 2>/dev/null || true
           cat window.err >&2 || true
           cat window.out
-          grep -q "closed=true reopened=true shellAlive=true ranCommand=true" window.out \
-            || { echo "::error::a closed window did not come back with a working shell"; exit 1; }
+          grep -q "closed=true reopened=true shellAlive=true ranCommand=true minSize=1" window.out \
+            || { echo "::error::a closed window did not come back with a working shell, or has no floor"; exit 1; }
           echo "Reopen after close passed"
 
       # Tabs: a strip you can see, and a shell in each that no other tab can
@@ -145,6 +145,73 @@ jobs:
           grep -q "title=1 unread=1 closed=2 sameShells=1 lastTabClosesWindow=1 onlyStrip=1" tabs.out \
             || { echo "::error::tabs did not work"; exit 1; }
           echo "Tabs passed"
+
+      # The palette, driven with real key events. This catches two things review
+      # did not: a text field's own `keyDown` never sees an arrow while the field
+      # is being edited, and the palette itself used to throw before drawing a row,
+      # because each row's width was constrained to the list before the row had
+      # joined it.
+      - name: Command palette
+        run: |
+          .build/release/Nymbra --palette-test > palette.out 2> palette.err &
+          pid=$!
+          for _ in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            echo "::error::--palette-test did not finish"
+          fi
+          wait "$pid" 2>/dev/null || true
+          cat palette.err >&2 || true
+          cat palette.out
+          grep -q "opens=1 listed=1 shortcuts=1 typed=1 filtered=1 top=1 arrows=1 return=1 escape=1" palette.out \
+            || { echo "::error::the palette did not answer the keyboard"; exit 1; }
+          echo "Command palette passed"
+
+      # Find, including the highlight, which is judged by the pixels the view
+      # draws. A highlight painted where the terminal's rows then paint over it
+      # leaves every other assertion in this file correct and the screen blank —
+      # which is exactly what a screenful-off row calculation did.
+      - name: Find bar and its highlight
+        run: |
+          .build/release/Nymbra --find-test > find.out 2> find.err &
+          pid=$!
+          for _ in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            echo "::error::--find-test did not finish"
+          fi
+          wait "$pid" 2>/dev/null || true
+          cat find.err >&2 || true
+          cat find.out
+          grep -q "printed=1 bar=1 typed=1 count=1 next=1 previous=1 escape=1 reopened=1 follow=1" find.out \
+            || { echo "::error::the find bar did not behave"; exit 1; }
+          grep -q "leftBehind=0" find.out \
+            || { echo "::error::the find highlight was not cleared again"; exit 1; }
+          painted=$(sed -n 's/.*highlight=\([0-9]*\).*/\1/p' find.out | head -1)
+          if [ "${painted:-0}" -lt 1000 ]; then
+            echo "::error::the find highlight drew nothing (highlight=${painted:-0} bytes)"
+            exit 1
+          fi
+          echo "Find passed"
+
+      # The settings window: the gallery, the recorder's rules, and that closing
+      # the window releases the event monitor the recorder installs — a monitor
+      # that outlives its window swallows Escape application-wide.
+      - name: Settings window
+        run: |
+          .build/release/Nymbra --settings-test > settings.out 2> settings.err &
+          pid=$!
+          for _ in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            echo "::error::--settings-test did not finish"
+          fi
+          wait "$pid" 2>/dev/null || true
+          cat settings.err >&2 || true
+          cat settings.out
+          grep -q "recording=1 unmodified=1 conflict=1 accepted=1 released=1 ok=1" settings.out \
+            || { echo "::error::the settings window or its shortcut recorder misbehaved"; exit 1; }
+          echo "Settings window passed"
 
       # Shell integration: a real zsh, started the way Nymbra starts one, has to
       # say what it is doing — and still run the user's own startup file. No
