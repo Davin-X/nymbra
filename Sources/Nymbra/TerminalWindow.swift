@@ -11,16 +11,27 @@ import UserNotifications
 ///
 /// All shell spawning goes through `posix_spawn` (ADR-0007), so a second tab —
 /// like a second window or a split — can be started after AppKit is running.
-final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTextFieldDelegate, NSSearchFieldDelegate {
+final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSToolbarDelegate,
+    NSTextFieldDelegate, NSSearchFieldDelegate {
     let window: NSWindow
     let tabView: TabStripView
-    private let contentView = NSView()
-    private let findBar = NSVisualEffectView()
-    private let findSearchField = NSSearchField()
-    private let findCountLabel = NSTextField(labelWithString: "0 matches")
-    private let findPreviousButton = NSButton()
-    private let findNextButton = NSButton()
-    private let findCloseButton = NSButton()
+    private let findSearchField = FindSearchField()
+
+    private enum ToolbarItemID {
+        static let find = NSToolbarItem.Identifier("nymbra.find")
+    }
+
+    private final class FindSearchField: NSSearchField {
+        var onCancel: (() -> Void)?
+
+        override func keyDown(with event: NSEvent) {
+            if event.keyCode == 53 {
+                onCancel?()
+                return
+            }
+            super.keyDown(with: event)
+        }
+    }
 
     /// Every tab, by identity. The focused tab's container is the one in the
     /// window hierarchy.
@@ -86,24 +97,15 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
 
         window.delegate = self
         window.title = "Nymbra"
-        window.contentView = contentView
+        window.contentView = tabView
         window.setContentSize(frame.size)
         window.center()
         window.isReleasedWhenClosed = false
-        // A window that cannot be shrunk past a usable grid. Without a floor the
-        // window goes down to nothing and the shell is told it has one column,
-        // which then redraws every line it prints into a strip one character wide.
-        window.contentMinSize = NSSize(width: 420, height: 260)
-
-        contentView.addSubview(tabView)
-        tabView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            tabView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            tabView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            tabView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            tabView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
-        configureFindBar()
+        let toolbar = NSToolbar(identifier: NSToolbar.Identifier("nymbra.window-toolbar"))
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
 
         // A window that will not be a tab of somebody else's window. Nymbra's tabs
         // are inside it (see the note in `main.swift`); the system's would be a
@@ -115,20 +117,22 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
         // the window: ⌘T swaps one view for another and the only evidence is the
         // screen going blank for a moment, which reads as the window reloading.
         //
-        // Tabs at the top, and no border. The `.bezel` border type draws a frame
-        // around the content; measured, it does *not* change the layout — the tab
-        // view reported the same (-7,-10,1008,556) inside the same 994x540 window
-        // with the border on or off, because those are the alignment insets of
-        // `NSTabView` itself. So this is about the drawn frame, not the geometry:
-        // a terminal should reach its window's edges, not sit in a picture frame.
+        // The modern pair, rather than the deprecated `tabViewType`: tabs at the
+        // top, with the content bevelled behind them.
         tabView.tabPosition = .top
-        tabView.tabViewBorderType = .none
+        tabView.tabViewBorderType = .bezel
         tabView.plusItem = plusItem
         tabView.onTabRightClick = { [weak self] item in self?.showTabMenu(for: item) }
         tabView.onAddTab = { [weak self] in _ = self?.newTab() }
         tabView.onTabReorder = { [weak self] item, index in self?.reorderTab(item, to: index) }
         findSearchField.placeholderString = "Find in terminal"
         findSearchField.delegate = self
+        findSearchField.onCancel = { [weak self] in self?.cancelFind() }
+        findSearchField.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            findSearchField.widthAnchor.constraint(equalToConstant: 240),
+            findSearchField.heightAnchor.constraint(equalToConstant: 28),
+        ])
 
         let first = TerminalWindow.firstTab
         let tab = try TerminalTab(configuration: configuration)
@@ -141,8 +145,6 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
         plusItem.label = "+"
         plusItem.view = NSView()
         tabView.addTabViewItem(plusItem)
-        contentView.layoutSubtreeIfNeeded()
-        tabView.layoutSubtreeIfNeeded()
     }
 
     /// Add a tab's container view as an NSTabViewItem and wire the back-reference.
@@ -263,166 +265,46 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
     }
 
     func beginFind() {
-        findBar.isHidden = false
+        if window.toolbar?.items.contains(where: { $0.itemIdentifier == ToolbarItemID.find }) != true {
+            window.toolbar?.insertItem(withItemIdentifier: ToolbarItemID.find, at: 0)
+        }
         focusedView?.startFind(query: findSearchField.stringValue)
         window.makeFirstResponder(findSearchField)
         findSearchField.selectText(nil)
-        updateFindCount()
     }
 
-    func cancelFind() {
+    private func cancelFind() {
         findSearchField.stringValue = ""
         focusedView?.endFind()
-        findBar.isHidden = true
         window.makeFirstResponder(focusedView)
     }
 
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSSearchField, field === findSearchField else { return }
         focusedView?.updateFind(query: field.stringValue)
-        updateFindCount()
     }
 
-    /// Escape and Return arrive *here*, not in the field's own `keyDown`: while a
-    /// field is being edited the first responder is the field's editor, an
-    /// `NSTextView`, and the control itself never sees the key. Measured rather
-    /// than assumed — a key event sent the way the application sends one reaches
-    /// this method with `cancelOperation:` and `insertNewline:`, and never
-    /// reaches a `keyDown` override on the field.
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        switch commandSelector {
-        case #selector(NSResponder.cancelOperation(_:)):
-            cancelFind()
-            return true
-        case #selector(NSResponder.insertNewline(_:)):
-            findNext()
-            return true
-        default:
-            return false
-        }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, ToolbarItemID.find]
     }
 
-    func findNext() {
-        focusedView?.findNext()
-        updateFindCount()
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, ToolbarItemID.find]
     }
 
-    func findPrevious() {
-        focusedView?.findPrevious()
-        updateFindCount()
-    }
-
-    private func updateFindCount() {
-        findCountLabel.stringValue = focusedView?.findStatus ?? "0 matches"
-        let hasMatches = focusedView?.findHasMatches ?? false
-        findPreviousButton.isEnabled = hasMatches
-        findNextButton.isEnabled = hasMatches
-    }
-
-    // MARK: - Reading the find bar back
-    //
-    // `--find-test` types into the bar, steps through matches, and escapes out of
-    // it, then prints what the bar shows. These are the facts it asserts, and
-    // they are the same values the bar draws.
-
-    /// Whether the find bar is on screen.
-    var findBarIsVisible: Bool { !findBar.isHidden }
-
-    /// What the bar's count label says right now.
-    var findStatusText: String { findCountLabel.stringValue }
-
-    /// The query the bar is holding.
-    var findQuery: String { findSearchField.stringValue }
-
-    private func synchronizeFindWithFocus() {
-        guard !findBar.isHidden else { return }
-        focusedView?.startFind(query: findSearchField.stringValue)
-        updateFindCount()
-    }
-
-    private func configureFindBar() {
-        findBar.material = .hudWindow
-        findBar.blendingMode = .withinWindow
-        findBar.state = .active
-        findBar.wantsLayer = true
-        findBar.layer?.cornerRadius = 9
-        findBar.layer?.borderWidth = 1
-        findBar.layer?.borderColor = NSColor.separatorColor.cgColor
-        findBar.layer?.masksToBounds = true
-        findBar.translatesAutoresizingMaskIntoConstraints = false
-        findBar.isHidden = true
-
-        findSearchField.placeholderString = "Find in terminal output…"
-        findSearchField.setAccessibilityLabel("Find in terminal output")
-        findSearchField.translatesAutoresizingMaskIntoConstraints = false
-
-        findCountLabel.font = .systemFont(ofSize: 10)
-        findCountLabel.textColor = .secondaryLabelColor
-        findCountLabel.alignment = .center
-        findCountLabel.setContentHuggingPriority(.required, for: .horizontal)
-        findCountLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        configureFindButton(findPreviousButton, symbol: "chevron.up",
-                            label: "Previous match", action: #selector(findPreviousClicked(_:)))
-        configureFindButton(findNextButton, symbol: "chevron.down",
-                            label: "Next match", action: #selector(findNextClicked(_:)))
-        configureFindButton(findCloseButton, symbol: "xmark",
-                            label: "Close search", action: #selector(findCloseClicked(_:)))
-
-        let controls = NSStackView(views: [
-            findSearchField, findCountLabel, findPreviousButton, findNextButton, findCloseButton,
-        ])
-        controls.orientation = .horizontal
-        controls.alignment = .centerY
-        controls.spacing = 5
-        controls.translatesAutoresizingMaskIntoConstraints = false
-        findBar.addSubview(controls)
-        contentView.addSubview(findBar)
-        let preferredWidth = findBar.widthAnchor.constraint(equalToConstant: 420)
-        preferredWidth.priority = .defaultHigh
-        NSLayoutConstraint.activate([
-            findBar.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 38),
-            findBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            preferredWidth,
-            findBar.widthAnchor.constraint(lessThanOrEqualToConstant: 440),
-            findBar.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
-            findBar.heightAnchor.constraint(equalToConstant: 44),
-            controls.leadingAnchor.constraint(equalTo: findBar.leadingAnchor, constant: 7),
-            controls.trailingAnchor.constraint(equalTo: findBar.trailingAnchor, constant: -7),
-            controls.topAnchor.constraint(equalTo: findBar.topAnchor, constant: 6),
-            controls.bottomAnchor.constraint(equalTo: findBar.bottomAnchor, constant: -6),
-            findSearchField.heightAnchor.constraint(equalToConstant: 28),
-            findPreviousButton.widthAnchor.constraint(equalToConstant: 27),
-            findNextButton.widthAnchor.constraint(equalToConstant: 27),
-            findCloseButton.widthAnchor.constraint(equalToConstant: 27),
-        ])
-    }
-
-    private func configureFindButton(_ button: NSButton, symbol: String,
-                                    label: String, action: Selector) {
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        button.title = ""
-        button.imagePosition = .imageOnly
-        button.bezelStyle = .rounded
-        button.setButtonType(.momentaryPushIn)
-        button.target = self
-        button.action = action
-        button.toolTip = label
-        button.setAccessibilityLabel(label)
-        button.refusesFirstResponder = true
-        button.translatesAutoresizingMaskIntoConstraints = false
-    }
-
-    @objc private func findPreviousClicked(_ sender: NSButton) {
-        findPrevious()
-    }
-
-    @objc private func findNextClicked(_ sender: NSButton) {
-        findNext()
-    }
-
-    @objc private func findCloseClicked(_ sender: NSButton) {
-        cancelFind()
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard itemIdentifier == ToolbarItemID.find else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = "Find"
+        item.paletteLabel = "Find in Terminal"
+        item.toolTip = "Search terminal output"
+        item.view = findSearchField
+        item.visibilityPriority = .high
+        return item
     }
 
     /// Bring a tab to the front.
@@ -435,7 +317,6 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
         focusedTab = id
         markRead(id)
         tabView.selectTabViewItem(withIdentifier: id)
-        synchronizeFindWithFocus()
     }
 
     @discardableResult
@@ -445,10 +326,6 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
 
     func focus(_ pane: PaneID) {
         tabs[focusedTab]?.focus(pane)
-    }
-
-    func focusedPaneDidChange() {
-        synchronizeFindWithFocus()
     }
 
     func focusNextPane() {

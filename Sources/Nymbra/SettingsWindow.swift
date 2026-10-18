@@ -11,8 +11,7 @@ import NymbraInput
 /// There is no state here that is not in the configuration — which is what stops
 /// the window and the file from disagreeing, and what makes the preview real
 /// rather than a mock-up.
-final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, NSSearchFieldDelegate,
-    NSWindowDelegate {
+final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, NSSearchFieldDelegate {
 
     private var configuration: Configuration
     private let onChange: (Configuration) -> Void
@@ -69,7 +68,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         window.title = "Nymbra Settings"
         window.minSize = NSSize(width: 840, height: 560)
         super.init(window: window)
-        window.delegate = self
 
         let content = makeContent()
         window.contentView = content
@@ -766,22 +764,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     // MARK: - Actions: keyboard
 
     @objc private func shortcutRecordRequested(_ sender: ShortcutCaptureButton) {
-        guard let raw = sender.identifier?.rawValue, let command = Command(rawValue: raw) else { return }
-        beginRecording(command)
-    }
-
-    /// Start recording a shortcut for `command`, exactly as clicking the command's
-    /// button does.
-    ///
-    /// Internal rather than private because `--settings-test` drives this path: the
-    /// monitor it installs sees every key in the application, so one that outlives
-    /// the window it belongs to would swallow Escape everywhere — including in the
-    /// terminal. That has to be a failing test rather than a review note.
-    func beginRecording(_ command: Command) {
         stopShortcutRecording()
-        guard let field = shortcutFields[command] else { return }
+        guard let raw = sender.identifier?.rawValue, let command = Command(rawValue: raw) else { return }
         recordingShortcut = command
-        field.title = "Press shortcut…"
+        sender.title = "Press shortcut…"
         shortcutWarning.textColor = .secondaryLabelColor
         shortcutWarning.stringValue = "Press a shortcut with at least one modifier. Escape cancels."
         shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -801,18 +787,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
 
     private var recordingShortcut: Command?
 
-    /// Handle a key while recording.
-    ///
-    /// Returns the event when it is somebody else's — including when nothing is
-    /// being recorded, which is what makes a monitor that is on its way out
-    /// harmless rather than a trap.
-    ///
-    /// Internal for the same reason as `beginRecording`: `--settings-test` sends
-    /// events through it, because the rules it enforces (a modifier is required, a
-    /// key already in use is refused) are claims in the changelog, and a claim
-    /// should be an assertion.
-    func captureShortcut(_ event: NSEvent) -> NSEvent? {
-        guard recordingShortcut != nil else { return event }
+    private func captureShortcut(_ event: NSEvent) -> NSEvent? {
         if event.keyCode == 53 {
             stopShortcutRecording()
             shortcutWarning.stringValue = ""
@@ -893,13 +868,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
                                            overrides: configuration.keyboard.overrides)?.display ?? "Record"
         }
         recordingShortcut = nil
-    }
-
-    /// A recording must not outlive its window: the monitor it installs sees every
-    /// key the application gets, so one left behind would swallow Escape in the
-    /// terminal, in the command palette, and anywhere else that wants it.
-    func windowWillClose(_ notification: Notification) {
-        stopShortcutRecording()
     }
 
     private func commitShortcut(_ shortcut: Shortcut, for command: Command, field: ShortcutCaptureButton) {
@@ -1040,17 +1008,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     }
 
     /// The colour preset names shown in the gallery.
-    ///
-    /// Read from the cards themselves rather than from the enum: what the window
-    /// shows is the thing worth asserting, and a gallery that stopped drawing a
-    /// preset should fail a test rather than quietly agree with the enum.
-    var presetTitles: [String] { gallery.map { Self.title($0.preset) } }
-
-    /// Whether a shortcut is being recorded right now.
-    var isRecordingShortcut: Bool { recordingShortcut != nil }
-
-    /// The warning line the keyboard page is showing.
-    var shortcutWarningText: String { shortcutWarning.stringValue }
+    var presetTitles: [String] { Configuration.Colours.Preset.allCases.map(Self.title) }
 
     /// A compact summary of loaded controls, for the headless settings proof.
     var appearanceSummary: String {
