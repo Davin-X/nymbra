@@ -20,6 +20,9 @@ public final class Terminal {
     public var onExit: (() -> Void)?
     /// Called on `deliveryQueue` for a `BEL`.
     public var onBell: (() -> Void)?
+    /// Called on `deliveryQueue` for a shell-integration mark (`OSC 133`), which
+    /// is how the shell reports prompts, commands and exit statuses.
+    public var onShellMark: ((ShellMark) -> Void)?
 
     private let ioQueue: DispatchQueue
     private let deliveryQueue: DispatchQueue
@@ -55,6 +58,7 @@ public final class Terminal {
         started = true
         parser.onResponse = { [weak self] bytes in self?.send(bytes) }
         parser.onBell = { [weak self] in self?.onBell?() }
+        parser.onShellMark = { [weak self] mark in self?.onShellMark?(mark) }
         ioQueue.async { [weak self] in self?.readLoop() }
     }
 

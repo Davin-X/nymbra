@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the shell can now say what it is doing
+
+The parser understands `OSC 133`, the sequence a shell writes to report its own
+progress: `A` when a prompt goes up, `B` where the command line begins, `C` just
+before the command runs, and `D` when it has finished, carrying the exit status.
+The marks arrive as a `ShellMark` through `Parser.onShellMark` and
+`Terminal.onShellMark`, and not one of them is ever drawn.
+
+- A finish with no status is reported as *no status*, not as success: `OSC 133;D`
+  and `OSC 133;D;0` say different things, and the parser keeps them apart rather
+  than picking a default that reads as "it worked".
+- The parser treats an unknown mark, and a code that merely starts with `133`
+  (`1337`), exactly as it treated every other OSC it does not implement: ignored,
+  and never guessed at.
+- Nothing is built on the marks yet, and nothing can be: a mark is only worth
+  what the shell that emits it is worth, and no shell emits these by itself. The
+  snippets that teach `zsh`/`bash`/`fish` to write them come next, and the badge,
+  the notification and the timeline that M4 promises are all downstream of that.
+
 ### Fixed — `make check` could never pass
 
 `make check` ran `swiftlint lint --strict` as its first step. But the CI job that
