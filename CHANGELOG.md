@@ -50,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the ring) as well as a shade difference. The block is asserted at 3:1 against
   its ink, the two blocks are visibly different in all eight presets, and
   `--find-test` asserts that the current match renders differently from the others.
+- **A terminal with no size on the screen.** The first tab of a window is now
+  shown *after* the window has been laid out, and a view with no size is no longer
+  treated as a terminal with no cells — because it was, and the screen was wiped
+  and stayed wiped: a shell printed its prompt into a grid of nothing, kept
+  running, and never learned that everything it drew afterwards was going nowhere.
+  The view refuses a degenerate frame, and `--resize-test` now prints text, sets
+  the frame to zero, and requires the same text back with no resize reported.
 
 ### Added — a command palette, recorded shortcuts and a useful tab strip
 
@@ -59,8 +66,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reject unmodified keys and conflicts, and let a command return to its default.
 - **Custom shells** accept an absolute path only when it names an existing,
   executable file; the selected shell is used for new sessions.
-- **Tabs** can be reordered by dragging one onto another, keeping the `+` item
-  at the end and preserving the selected terminal.
+- **Tabs are drawn by Nymbra**, not by `NSTabView`. The stock strip centres its
+  items, cannot carry a close button, and offers no menu — three things a tab
+  strip is for. The strip is now a row of chips made from the left edge inward, in
+  the order the tabs were opened, each with its own `×`, with the `+` after the
+  last of them rather than floating in the middle, and with the terminal reaching
+  the window's edges on the other three sides. Each chip is a drag handle for
+  reordering, a right-click target for the tab menu, and — through its `×` — a way
+  to close a tab you are not looking at without being moved into it.
+- `--tabs-test` reads that geometry off the frames rather than a picture: the
+  strip is the window's top edge, the tabs' host covers everything below it and
+  both side edges, one chip starts at the left, the chips do not overlap and the
+  `+` is to the right of the last of them, the `+` is *pressed* rather than called
+  (a `+` that is not wired cannot make a tab), and a background tab is closed by
+  its own `×` with the front tab unmoved.
 - **Find** is a bar over the terminal — query, match count, `↑` `↓`, `×` — opened
   by `⌘F` and gone on Escape. The query belongs to the pane in front, so switching
   tabs switches searches with it, and next/previous keep their commands.

@@ -136,6 +136,14 @@ final class TermView: NSView {
     }
 
     private func updateGridSize() {
+        // A view with no size is not a terminal with no cells. A view is sizeless
+        // for a moment every time it is put into a window — the frame is set
+        // before the container around it has been laid out — and sizing the screen
+        // to fit nothing throws away everything the shell has already printed.
+        // The shell never finds out, so it never redraws: the screen goes blank and
+        // stays blank, with a perfectly healthy shell inside it.
+        guard bounds.width > 0, bounds.height > 0 else { return }
+
         let size = GridSize(
             fittingWidth: bounds.width,
             height: bounds.height,

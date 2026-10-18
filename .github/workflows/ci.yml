@@ -142,8 +142,10 @@ jobs:
           cat tabs.out
           grep -q "strip=1 plus=1 created=1 ownShells=1 independent=1 switched=1 " tabs.out \
             || { echo "::error::tabs did not work"; exit 1; }
-          grep -q "title=1 unread=1 closed=2 sameShells=1 lastTabClosesWindow=1 onlyStrip=1" tabs.out \
+          grep -q "title=1 unread=1 closed=2 closeButton=1 crowded=1 sameShells=1 lastTabClosesWindow=1 onlyStrip=1" tabs.out \
             || { echo "::error::tabs did not work"; exit 1; }
+          grep -q "reordered=1" tabs.out \
+            || { echo "::error::tab reorder did not work"; exit 1; }
           echo "Tabs passed"
 
       # The palette, driven with real key events. This catches two things review

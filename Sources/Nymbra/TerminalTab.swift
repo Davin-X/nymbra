@@ -12,11 +12,11 @@ final class TerminalTab {
     var onSpawnFailure: ((Error) -> Void)?
     var focusedView: TermView? { panes[focusedPane]?.view }
 
-    /// The strip's item for this tab, so it can name itself.
+    /// The strip's chip for this tab, so it can name itself.
     ///
     /// Set in `attach`, once. A tab that never got attached (a spawn that failed
     /// before the view existed) has none, and then it is simply silent.
-    weak var item: NSTabViewItem?
+    weak var stripItem: TabBarView.Tab?
 
     /// A name the person gave this tab, which is what the strip and the window
     /// then call it. `nil` means "whatever the shell says it is".
@@ -82,7 +82,7 @@ final class TerminalTab {
         // bytes otherwise. A shell that has not been taught to report sends
         // nothing here, and then nothing happens.
         terminal.onShellMark = { [weak self, weak pane] mark in
-            guard let self, let pane, let tab = self.item?.identifier as? TabID else { return }
+            guard let self, let pane, let tab = self.stripItem?.identifier else { return }
             guard let finished = pane.commands.note(mark) else { return }
             self.host?.commandFinished(in: tab, status: finished.status,
                                        seconds: finished.seconds)
@@ -217,7 +217,7 @@ final class TerminalTab {
     /// window's to know — the same reason the window, not the tab, owns the
     /// window's title.
     private func noteOutput() {
-        guard let id = item?.identifier as? TabID else { return }
+        guard let id = stripItem?.identifier else { return }
         host?.tabDidReceiveOutput(id)
     }
 

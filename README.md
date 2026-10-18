@@ -123,9 +123,9 @@ of its own settings file.
 | `make dist` | Zip the bundle for somebody else |
 | `make pty-test` | Headless proof that a login shell runs on a PTY |
 | `make screen-test` | Feed real output through the parser and dump the screen |
-| `make resize-test` | Proof that the view and the shell agree on the grid |
+| `make resize-test` | Proof that the view and the shell agree on the grid, and that no size is not a size |
 | `make window-test` | Close a window, get a working shell back, and check the floor under the window |
-| `make tabs-test` | A tab strip, including tab reordering, independent switching and closing |
+| `make tabs-test` | The strip's geometry, per-tab close buttons, reordering, and independent shells |
 | `make palette-test` | The command palette, driven with real key events |
 | `make find-test` | Find options, the highlight the view actually draws, and a proof that the current match looks different from the others |
 | `make settings-test` | The settings window and the shortcut recorder's rules |
@@ -147,7 +147,8 @@ asserted in text rather than by eye:
 | `--settings-test` | The settings window's pages, gallery, and the recorder's rules and lifetime |
 | `--palette-test` | The palette's rows, highlight, arrows, Return and Escape |
 | `--find-test` | The find bar's state, its three options, and the pixels of the highlight it draws |
-| `--resize-test` | The grid the view reports against the grid the shell is told |
+| `--resize-test` | The grid the view reports against the grid the shell is told, including a view with no size |
+| `--tabs-test` | The strip's edges, chip order and `+`, the `×` on a chip, and independent shells |
 
 `make check` is the gate: it must pass before any change is considered done.
 See [CONTRIBUTING.md](CONTRIBUTING.md).

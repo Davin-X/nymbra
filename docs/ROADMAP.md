@@ -57,7 +57,7 @@ visible rather than discovered later.
 | Copy/paste | ✅ selection (click, word, line, drag), Cmd+C and Cmd+V with bracketed paste | — |
 | Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen | — |
 | Search in scrollback | ✅ a find bar (`⌘F`) over the terminal — query, match count, match case, whole word, regular expression, `↑` `↓`, `×` — with next/previous, `Invalid regex` reported rather than passed off as no matches, the query following the focused tab, and matches highlighted both in the live screen and in history; the matching is the model's and is asserted there (`FindSuite`: the three options, word boundaries, patterns that do not compile, and cells rather than characters), while the highlight is asserted by the pixels the view draws (`--find-test`), because a highlight nobody can see is invisible to every other kind of test. A match broken across a soft wrap is not found yet: the matcher reads one row at a time | M3 |
-| Tabs and split panes | ✅ tabs can be reordered; right-click offers tab actions | M1.x (P0) |
+| Tabs and split panes | ✅ tabs are drawn by Nymbra rather than `NSTabView` — chips from the left edge in the order they were opened, a `×` on each (closing that tab without moving the person into it), the `+` after the last of them, the terminal filling the window below, right-click for tab actions, drag to reorder; the geometry is asserted from the frames (`--tabs-test`: strip, host, order, `+`, `×`) because "the tabs are on screen where they say they are" is not a claim a unit test can make. A strip with more tabs than fit does not scroll yet | M1.x (P0) |
 | Text reflow on resize | ✅ live screen and history rewrap on resize; soft-wrapped rows are rejoined and rewrapped | — |
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
 | Settings: theme, font, colours, cursor, keybindings | ✅ navigable pages, live preview, shortcut recording, custom executable shell paths, and a readable palette | M2 |
@@ -145,7 +145,10 @@ shells that look correct cannot answer the question, and the witness that can is
 
 **Done**
 - **Tabs**, with a visible tab strip, each tab holding its own panes, and a title
-  that follows the focused shell — `⌘⇧T`, `⌘⇧W`, `⌘⇧[` / `⌘⇧]`. The per-tab
+  that follows the focused shell — `⌘⇧T`, `⌘⇧W`, `⌘⇧[` / `⌘⇧]`. The strip is drawn
+  by Nymbra (`TabBarView`): chips from the left edge in the order the tabs were
+  opened, a `×` on each, the `+` after the last of them, right-click for the tab
+  menu, drag to reorder, and the terminal filling the window below. The per-tab
   **unread badge** followed in M3 (a dot while a tab prints in the background);
   its finished-command form needs `OSC 133` and stays in M4.
 - **Horizontal and vertical splits** — `⌘D` and `⌘⇧D`, closed with `⌘W`, resized
@@ -156,6 +159,12 @@ shells that look correct cannot answer the question, and the witness that can is
 **Acceptance:** four panes, each running a different program, resized and closed
 independently, with no shared mutable state between them. — met: `make
 split-test` reports `panes=4 … jobControl=1 … closed=3 sameShells=1`.
+
+**Not done:** a strip that scrolls. Chips shrink as tabs accumulate — down to a
+minimum — and past that the last ones are clipped rather than reachable by
+scrolling, so thirty tabs are thirty tabs you can reach with `⌘⇧]` or the palette
+but not with the mouse. A horizontally scrolling strip is the fix, and it is
+worth doing before anybody has thirty tabs.
 
 ### M2 — Settings and configuration ✅
 
