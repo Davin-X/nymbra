@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a setting for the shell integration, off until asked for
+
+`behaviour.shellIntegration` (`docs/CONFIG.md`) turns on the zsh integration from
+the entry below. Off by default, and deliberately: it changes how somebody's
+shell *starts*, and a terminal that quietly rearranges your startup is not one to
+trust.
+
+- It applies to shells started *after* the change. A shell already running keeps
+  the environment it was born with; an environment cannot be handed to a process
+  that has already started, so the change lands on the next tab or pane.
+- Nothing is edited and nothing has to be undone. The generated files live in a
+  directory of Nymbra's own under the application support folder, and turning the
+  setting off simply stops pointing `ZDOTDIR` at them.
+- `Configuration.supportDirectory` is where Nymbra keeps its own files, derived
+  from `config.json`'s own location, so `$NYMBRA_CONFIG` moves all of it at once
+  and a test never has to touch the real one.
+- `--shell-integration-test` now asks for the integration the way the app does,
+  through `configuration.shellIntegration()`, so what is covered is the setting
+  and the writing of the files rather than only the parser at the other end.
+- Failing to write the files is not an error the user sees. A terminal that
+  refused to open a window because it could not write its own shell helper would
+  be a worse bug than the one it was reporting, so the shell starts without
+  integration — the same visible result as the setting being off.
+
 ### Added — a zsh integration that says what the shell is doing
 
 The marks in the entry below only exist if something tells the shell to send

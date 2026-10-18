@@ -19,7 +19,7 @@ ignored. A terminal must never refuse to start because of its own settings file.
 |---------|-------------|
 | `appearance` | Font family and size |
 | `colours` | Colour preset and per-colour overrides |
-| `behaviour` | Cursor, scrollback, confirm-on-close |
+| `behaviour` | Cursor, scrollback, confirm-on-close, shell integration |
 | `keyboard` | Keybinding overrides |
 | `shell` | Login shell path |
 
@@ -59,6 +59,23 @@ An unknown name or a value that is not `#rrggbb` is dropped with a warning.
 | `cursorBlinks` | boolean | `true` | |
 | `scrollbackLines` | integer | `10000` | |
 | `confirmBeforeClosingRunningSession` | boolean | `true` | |
+| `shellIntegration` | boolean | `false` | `OSC 133` marks; zsh only, and only for shells started afterwards |
+
+### Shell integration
+
+`shellIntegration` asks the shell to report what it is doing, with `OSC 133`
+marks: where a prompt starts, when a command runs, and when it finishes and with
+what status. zsh only, so far — a *login* bash reads `.bash_profile` and never
+`.bashrc`, so it needs a different mechanism again.
+
+Turning it on does not edit anything of yours. Nymbra starts the shell with
+`ZDOTDIR` pointing at a directory of its own inside the application support
+folder, whose files load your own startup files first and then a small snippet.
+Turning it off stops pointing at them; there is nothing to undo.
+
+It takes effect for shells started *after* the change. A shell already running
+keeps the environment it was born with, and an environment cannot be handed to a
+process that has already started — so open a tab or a window.
 
 ## keyboard
 
@@ -96,7 +113,8 @@ Command names: `copy`, `paste`, `selectAll`, `clearBuffer`, `settings`,
     "cursorShape": "block",
     "cursorBlinks": true,
     "scrollbackLines": 10000,
-    "confirmBeforeClosingRunningSession": true
+    "confirmBeforeClosingRunningSession": true,
+    "shellIntegration": false
   },
   "keyboard": {
     "overrides": {}
