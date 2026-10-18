@@ -39,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   translation back to cells and uses it for both the literal and the pattern path.
   `FindSuite` asserts the arithmetic exactly; `--find-test` still judges the
   drawn pixels.
+- **The find highlight was nearly invisible, and all matches looked alike.**
+  A flat translucent slab the size of the cells is the shape a selection already
+  has, and two shades of the same tint are not a difference anybody can see in a
+  theme that has one colour to give. The highlight is now a solid block drawn from
+  the theme's ANSI yellow held back toward its own background — the one colour
+  every preset is held to 4.5:1 against its background, so it is the one a
+  highlight can be sure of being visible in. The match the person is on is the
+  same yellow held back less, and ringed with its own ink: a shape difference
+  (the ring) as well as a shade difference. The block is asserted at 3:1 against
+  its ink, the two blocks are visibly different in all eight presets, and
+  `--find-test` asserts that the current match renders differently from the others.
 
 ### Added — a command palette, recorded shortcuts and a useful tab strip
 

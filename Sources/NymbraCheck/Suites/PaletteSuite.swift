@@ -126,7 +126,38 @@ func paletteSuite(_ h: Harness) {
     h.expect(abs(Palette.RGB.contrastRatio(white, black) - 21) < 0.01, "contrast does not depend on order")
     h.expect(abs(Palette.RGB.contrastRatio(white, white) - 1) < 0.0001, "a colour on itself is 1:1")
 
-    // MARK: Hex
+// MARK: Find highlight
+
+    // The amounts used by the app: 0.35 for an ordinary match, 0.20 for the one
+    // the person is on. Both blocks must be legible against their own background,
+    // visibly different from each other, and not confused with the background or
+    // the foreground.
+    for preset in presets {
+        let palette = Palette(preset: preset)
+        let match = palette.findHighlight(amount: 0.35)
+        let current = palette.findHighlight(amount: 0.20)
+
+        // The block is the ANSI yellow held back toward the background.
+        // The lightest preset (paper) gives 2.49:1 at 0.35; the floor is 2.4.
+        h.expect(Palette.RGB.contrastRatio(match.block, palette.background) >= 2.4,
+                 "\(preset) match block vs background (\(rounded(Palette.RGB.contrastRatio(match.block, palette.background))):1)")
+        h.expect(Palette.RGB.contrastRatio(current.block, palette.background) >= 2.4,
+                 "\(preset) current block vs background (\(rounded(Palette.RGB.contrastRatio(current.block, palette.background))):1)")
+
+        // The ink is the foreground held to 3:1 against the block.
+        h.expect(Palette.RGB.contrastRatio(match.ink, match.block) >= 3.0,
+                 "\(preset) match ink vs match block (\(rounded(Palette.RGB.contrastRatio(match.ink, match.block))):1)")
+        h.expect(Palette.RGB.contrastRatio(current.ink, current.block) >= 3.0,
+                 "\(preset) current ink vs current block (\(rounded(Palette.RGB.contrastRatio(current.ink, current.block))):1)")
+
+        // The two blocks are visibly different.
+        let matchL = match.block.luminance
+        let curL = current.block.luminance
+        h.expect(abs(matchL - curL) >= 0.04,
+                 "\(preset) match vs current block luminance difference \(abs(matchL - curL))")
+    }
+
+// MARK: Hex
 
     h.equal(Palette.RGB(red: 0x1F, green: 0x24, blue: 0x30).hex, "#1f2430", "a colour prints as #rrggbb")
     h.equal(Palette.RGB(hex: "#1f2430"), Palette.RGB(red: 0x1F, green: 0x24, blue: 0x30), "hex parses back")

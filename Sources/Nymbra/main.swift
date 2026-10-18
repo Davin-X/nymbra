@@ -430,6 +430,19 @@ func runFindTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     let highlighted = differingBytes(plain, marked)
     let leftBehind = differingBytes(plain, cleared)
 
+    // The match the keys are on has to look like the match the keys are on: the
+    // bar says `1 of 2` and the screen has to say *which*. So the same query is
+    // rendered with the first match current and with the second current, and the
+    // two have to differ — which they can only do if the current one is drawn
+    // differently from the rest. The matches are on the same row, so nothing but
+    // the highlight moves.
+    view.startFind(query: "NYMBRA_FIND4")
+    let onFirst = pixels(of: view)
+    view.findNext()
+    let onSecond = pixels(of: view)
+    view.endFind()
+    let currentIsMarked = differingBytes(onFirst, onSecond) >= 200
+
     // The extra tab's shell is a real process, so it is closed here rather than
     // left to the end of the process.
     window.selectTab(secondTab)
@@ -442,7 +455,7 @@ func runFindTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
         && regexFinds && invalidReported && backToDefault
     let following = followedTab && followedBack
     let ok = behaviour && options && following && controlsInside
-        && highlighted >= 1000 && leftBehind == 0
+        && highlighted >= 1000 && leftBehind == 0 && currentIsMarked
     let state = "printed=\(flag(printed)) bar=\(flag(barOpened)) typed=\(flag(typed)) "
         + "count=\(flag(counted)) next=\(flag(nextWalked)) previous=\(flag(previousWalked)) "
         + "escape=\(flag(escaped)) reopened=\(flag(reopened))"
@@ -450,7 +463,7 @@ func runFindTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
         + "word=\(flag(wordRejects && wordAccepts)) regex=\(flag(regexFinds)) "
         + "invalid=\(flag(invalidReported)) reset=\(flag(backToDefault))"
     let drawn = "controls=\(flag(controlsInside)) follow=\(flag(following)) "
-        + "highlight=\(highlighted) leftBehind=\(leftBehind)"
+        + "highlight=\(highlighted) leftBehind=\(leftBehind) current=\(flag(currentIsMarked))"
     print("find-test\t" + state + " " + optionFlags + " " + drawn)
     return ok
 }

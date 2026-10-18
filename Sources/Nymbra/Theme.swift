@@ -20,6 +20,36 @@ struct Theme {
     var cursor: CGColor { Self.colour(palette.cursor) }
     var selection: CGColor { Self.colour(palette.selection) }
 
+    /// A find highlight: the block drawn behind a matched run, and the ink the
+    /// matched text is redrawn in on top of it.
+    struct Highlight {
+        let fill: CGColor
+        let ink: CGColor
+    }
+
+    /// How an ordinary match is drawn, and how the match the person is on is drawn.
+    ///
+    /// The block is the theme's yellow held back toward that theme's own background:
+    /// a solid colour rather than a wash, because a wash takes contrast away from the
+    /// text and gives back a tint. Both are the same yellow at two strengths, and the
+    /// match the count is talking about is the stronger one — `TermView` also rings
+    /// it, so telling them apart is a shape as well as a shade.
+    ///
+    /// The ink is the theme's own text colour, held to 3:1 against that block rather
+    /// than to the 4.5:1 the palette promises for body text. A find highlight is
+    /// chrome: the text under it is redrawn on the block, which is a background the
+    /// theme never chose, and holding a bright block to 4.5:1 answers by inking it
+    /// black — correct for an article, and wrong for the one lit thing on the screen.
+    /// 3:1 is the bar for graphics, and it is enough that no preset and no override
+    /// can produce a highlight that cannot be read.
+    var findMatch: Highlight { highlight(0.35) }
+    var findCurrent: Highlight { highlight(0.20) }
+
+    private func highlight(_ amount: Double) -> Highlight {
+        let (block, ink) = palette.findHighlight(amount: amount)
+        return Highlight(fill: Self.colour(block), ink: Self.colour(ink))
+    }
+
     /// The line between panes: the background nudged toward the foreground, so it
     /// reads as a seam in every preset — including the light ones, where a fixed
     /// grey would read as a border — and never competes with the text.
