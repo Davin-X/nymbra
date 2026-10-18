@@ -103,6 +103,15 @@ public struct Configuration: Codable, Equatable, Sendable {
         /// default: losing a running build to a stray Cmd+W is unforgivable.
         public var confirmBeforeClosingRunningSession = true
 
+        /// Ask the shell to report what it is doing, in `OSC 133` marks, by
+        /// starting it with a `ZDOTDIR` of Nymbra's own — see `ShellIntegration`.
+        ///
+        /// Off by default, and deliberately. This changes how somebody's shell
+        /// starts, and a terminal that quietly rearranges your startup is not one
+        /// to trust. It takes effect for shells started *after* the change: a
+        /// shell already running keeps the environment it was born with.
+        public var shellIntegration = false
+
         public init() {}
 
         public init(from decoder: Decoder) throws {
@@ -112,6 +121,7 @@ public struct Configuration: Codable, Equatable, Sendable {
             scrollbackLines = container.orDefault(.scrollbackLines, Behaviour.defaultScrollbackLines)
             confirmBeforeClosingRunningSession =
                 container.orDefault(.confirmBeforeClosingRunningSession, true)
+            shellIntegration = container.orDefault(.shellIntegration, false)
         }
     }
 
@@ -190,6 +200,14 @@ public struct Configuration: Codable, Equatable, Sendable {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
         return base.appendingPathComponent("Nymbra/config.json")
+    }
+
+    /// The directory Nymbra keeps its own files in — `config.json`'s own
+    /// directory. Anything Nymbra writes for itself goes under here, so
+    /// `$NYMBRA_CONFIG` moves all of it at once and a test never has to touch
+    /// the real one.
+    public static var supportDirectory: URL {
+        defaultURL.deletingLastPathComponent()
     }
 
     // MARK: - Loading and saving

@@ -162,3 +162,29 @@ public struct ShellIntegration: Sendable {
     preexec_functions=(__nymbra_preexec $preexec_functions)
     """#
 }
+
+extension Configuration {
+
+    /// The shell integration this configuration asks for, or `nil` when it asks
+    /// for none.
+    ///
+    /// The files are rewritten on every call, which is what makes the answer
+    /// always match the setting: turning the setting off has nothing to undo,
+    /// it just stops pointing `ZDOTDIR` at them. A shell already running keeps
+    /// whatever environment it was started with, so the change lands on the next
+    /// shell.
+    ///
+    /// Returns `nil` if the files cannot be written — a terminal that refused to
+    /// open a window because it could not write its own shell helper would be a
+    /// worse bug than the one it was reporting. The visible result is then the
+    /// same as the setting being off: a shell that does not report its marks.
+    public func shellIntegration(
+        in supportDirectory: URL = Configuration.supportDirectory,
+        userZDOTDIR: String = ProcessInfo.processInfo.environment["ZDOTDIR"] ?? ""
+    ) -> ShellIntegration? {
+        guard behaviour.shellIntegration else { return nil }
+        return try? ShellIntegration.zsh(
+            in: supportDirectory.appendingPathComponent("shell"),
+            userZDOTDIR: userZDOTDIR)
+    }
+}
