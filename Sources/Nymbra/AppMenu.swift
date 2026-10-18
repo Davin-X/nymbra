@@ -108,6 +108,13 @@ enum AppMenu {
         menu.addItem(.separator())
         menu.addItem(command(.clearBuffer, #selector(AppController.clearBuffer(_:)),
                              target: controller, configuration: configuration))
+        menu.addItem(.separator())
+        menu.addItem(command(.find, #selector(AppController.find(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(command(.findNext, #selector(AppController.findNext(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(command(.findPrevious, #selector(AppController.findPrevious(_:)),
+                             target: controller, configuration: configuration))
         return root
     }
 
