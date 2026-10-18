@@ -6,7 +6,7 @@ import NymbraInput
 final class CommandPaletteController: NSWindowController, NSTextFieldDelegate {
     private let commands: [Command]
     private let onSelect: (Command) -> Void
-    private let searchField = PaletteSearchField()
+    private let searchField = NSTextField()
     private let results = NSStackView()
     private let hint = NSTextField(labelWithString: "")
     private var configuration: Configuration
@@ -45,9 +45,6 @@ final class CommandPaletteController: NSWindowController, NSTextFieldDelegate {
         searchField.font = .systemFont(ofSize: 16)
         searchField.focusRingType = .default
         searchField.delegate = self
-        searchField.onMove = { [weak self] offset in self?.moveSelection(by: offset) }
-        searchField.onChoose = { [weak self] in self?.chooseSelection() }
-        searchField.onCancel = { [weak self] in self?.dismiss() }
 
         results.orientation = .vertical
         results.alignment = .leading
@@ -109,7 +106,43 @@ final class CommandPaletteController: NSWindowController, NSTextFieldDelegate {
     }
 
     func controlTextDidChange(_ notification: Notification) {
-        renderResults(matching: searchField.stringValue)
+        updateQuery(searchField.stringValue)
+    }
+
+    /// Show a query. Typing and a programmatic change both come through here, so
+    /// there is one place that knows how a query becomes a list.
+    func updateQuery(_ query: String) {
+        searchField.stringValue = query
+        // A new shortlist starts at its first row. Keeping the old index would
+        // point the highlight at whatever slot happened to survive the filter.
+        selectedIndex = 0
+        renderResults(matching: query)
+    }
+
+    /// Arrows, Return and Escape arrive *here*, not in a text field's own
+    /// `keyDown` — while a field is being edited the first responder is the
+    /// field's editor, an `NSTextView`, and the control itself never sees the
+    /// key. That is measured rather than assumed: a key event sent the way the
+    /// application sends one reaches this method with `moveUp:`, `moveDown:`,
+    /// `insertNewline:` and `cancelOperation:`, and never reaches a `keyDown`
+    /// override on the field.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        switch commandSelector {
+        case #selector(NSResponder.moveUp(_:)):
+            moveSelection(by: -1)
+            return true
+        case #selector(NSResponder.moveDown(_:)):
+            moveSelection(by: 1)
+            return true
+        case #selector(NSResponder.insertNewline(_:)):
+            chooseSelection()
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            dismiss()
+            return true
+        default:
+            return false
+        }
     }
 
     private func renderResults(matching query: String) {
@@ -135,26 +168,36 @@ final class CommandPaletteController: NSWindowController, NSTextFieldDelegate {
         }
 
         hint.stringValue = "↑ ↓ to navigate  ·  Return to run  ·  Esc to close"
-        for (index, command) in visibleCommands.enumerated() {
-            let button = commandButton(command, index: index)
+        for command in visibleCommands {
+            let button = commandButton(command)
             results.addArrangedSubview(button)
+            // A row spans the list, so its highlight is a full-width bar and the
+            // whole row is a click target. The constraint is made *here*, after
+            // the button has a superview: between views with no common ancestor —
+            // which is what a button and the stack are until it joins it — an
+            // activated constraint throws, and the palette is built before it is
+            // ever shown, so it would throw on the keystroke that opens it.
+            button.widthAnchor.constraint(equalTo: results.widthAnchor).isActive = true
         }
         updateSelection()
     }
 
-    private func commandButton(_ command: Command, index: Int) -> NSButton {
+    /// The text of a row: the command's name, and the shortcut it answers to now.
+    private func rowTitle(for command: Command) -> String {
         let shortcut = Command.shortcut(for: command, overrides: configuration.keyboard.overrides)
             .map { "  \($0.display)" } ?? ""
-        let button = NSButton(title: "\(command.title)\(shortcut)", target: self,
+        return "\(command.title)\(shortcut)"
+    }
+
+    private func commandButton(_ command: Command) -> NSButton {
+        let button = NSButton(title: rowTitle(for: command), target: self,
                               action: #selector(commandClicked(_:)))
         button.identifier = NSUserInterfaceItemIdentifier(command.rawValue)
         button.alignment = .left
         button.bezelStyle = .rounded
         button.setButtonType(.momentaryPushIn)
-        button.tag = index
         button.toolTip = command.explanation
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalTo: results.widthAnchor).isActive = true
         button.heightAnchor.constraint(equalToConstant: 34).isActive = true
         return button
     }
@@ -193,25 +236,25 @@ final class CommandPaletteController: NSWindowController, NSTextFieldDelegate {
         window?.orderOut(nil)
         parentWindow?.makeKeyAndOrderFront(nil)
     }
-}
 
-private final class PaletteSearchField: NSTextField {
-    var onMove: ((Int) -> Void)?
-    var onChoose: (() -> Void)?
-    var onCancel: (() -> Void)?
+    // MARK: - Reading the palette back
+    //
+    // `--palette-test` drives the palette with real key events and prints what
+    // came back. These are the facts it needs to see, and they are the same
+    // values the palette draws — so a query that filters nothing, or a highlight
+    // that does not move, is visible rather than merely invisible.
 
-    override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 126:
-            onMove?(-1)
-        case 125:
-            onMove?(1)
-        case 36, 76:
-            onChoose?()
-        case 53:
-            onCancel?()
-        default:
-            super.keyDown(with: event)
-        }
+    /// The rows on screen, with their shortcut labels, in draw order.
+    var visibleRows: [String] { visibleCommands.map(rowTitle(for:)) }
+
+    /// What Return would run.
+    var selectedCommand: Command? {
+        visibleCommands.indices.contains(selectedIndex) ? visibleCommands[selectedIndex] : nil
     }
+
+    /// Whether the panel is on screen. Escape has to be able to make this false.
+    var isShowing: Bool { window?.isVisible == true }
+
+    /// The query the search field is holding.
+    var query: String { searchField.stringValue }
 }
