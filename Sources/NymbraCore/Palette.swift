@@ -328,6 +328,27 @@ public struct Palette: Equatable, Sendable {
                    blue: mix(colour.blue, other.blue))
     }
 
+    /// The highlight a find match is drawn in for this palette: a yellow block and
+    /// the ink to draw its text in.
+    ///
+    /// Both are derived from the palette's ANSI yellow and its own background. The
+    /// block is the yellow held back toward the background by `amount` (0.35 for
+    /// an ordinary match, 0.20 for the match the person is on). The ink is the
+    /// palette's own text colour held to 3:1 against that block — 3:1 is the
+    /// graphics bar, and it is the one that keeps every preset's highlight legible
+    /// rather than nudging the ink to black when the block is bright and the
+    /// foreground is light (as happens at 4.5:1 on light presets).
+    ///
+    /// The amounts are chosen so the two blocks are visibly different in all eight
+    /// presets (their luminance differs by ≥ 0.04), and neither block is the same
+    /// as the background (ratio ≥ 2.5:1) or the same as the foreground
+    /// (ratio ≥ 2:1). `PaletteSuite` asserts this for all presets.
+    public func findHighlight(amount: Double) -> (block: RGB, ink: RGB) {
+        let block = Self.blend(ansi[3], with: background, amount: amount)
+        let ink = Self.readable(foreground, on: block, minimum: 3)
+        return (block, ink)
+    }
+
     // MARK: - Resolving
 
     /// The colour an SGR colour refers to, or `nil` for "the default", which

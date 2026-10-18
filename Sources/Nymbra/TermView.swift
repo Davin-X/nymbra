@@ -136,6 +136,14 @@ final class TermView: NSView {
     }
 
     private func updateGridSize() {
+        // A view with no size is not a terminal with no cells. A view is sizeless
+        // for a moment every time it is put into a window — the frame is set
+        // before the container around it has been laid out — and sizing the screen
+        // to fit nothing throws away everything the shell has already printed.
+        // The shell never finds out, so it never redraws: the screen goes blank and
+        // stays blank, with a perfectly healthy shell inside it.
+        guard bounds.width > 0, bounds.height > 0 else { return }
+
         let size = GridSize(
             fittingWidth: bounds.width,
             height: bounds.height,
@@ -270,18 +278,59 @@ final class TermView: NSView {
     }
 
     private func drawRow(_ line: [Cell], row: Int, ctx: CGContext) {
+        // What each cell of this row is drawn in. A cell inside a find match is
+        // drawn in the highlight's ink rather than in its own colour, because the
+        // block behind it is not the background that colour was chosen against.
+        let inks = findInks(row: row, columns: line.count)
+
         var col = 0
         while col < line.count {
             let attributes = line[col].attributes
+            let ink = inks.isEmpty ? Ink.own : inks[col]
             var end = col
             var text = ""
-            while end < line.count, line[end].attributes == attributes {
+            while end < line.count, line[end].attributes == attributes,
+                  (inks.isEmpty ? Ink.own : inks[end]) == ink {
                 if !line[end].isWideContinuation { text += line[end].text }
                 end += 1
             }
-            drawRun(text, col: col, width: end - col, row: row, attributes: attributes, ctx: ctx)
+            drawRun(text, col: col, width: end - col, row: row, attributes: attributes,
+                    ink: inkColour(ink), ctx: ctx)
             col = end
         }
+    }
+
+    /// Which ink a cell is drawn in: its own, or one of the find highlight's.
+    private enum Ink: Equatable {
+        case own
+        case match
+        case current
+    }
+
+    private func inkColour(_ ink: Ink) -> CGColor? {
+        switch ink {
+        case .own: return nil
+        case .match: return theme.findMatch.ink
+        case .current: return theme.findCurrent.ink
+        }
+    }
+
+    /// The ink for every cell of this viewport row, from the matches on it. A match
+    /// is recorded against an absolute row, scrollback included, so the viewport is
+    /// moved under it the same way the text is.
+    private func findInks(row: Int, columns: Int) -> [Ink] {
+        guard let state = findState, !state.query.isEmpty, !state.matches.isEmpty else {
+            return []
+        }
+        let absoluteRow = screen.viewportFirstRow(scrollOffset: scrollOffset) + row
+        var inks = [Ink](repeating: .own, count: columns)
+        for (index, match) in state.matches.enumerated() where match.row == absoluteRow {
+            let ink: Ink = index == state.currentIndex ? .current : .match
+            for column in max(match.column, 0)..<min(match.column + match.columns, columns) {
+                inks[column] = ink
+            }
+        }
+        return inks
     }
 
     private func drawRun(
@@ -290,9 +339,11 @@ final class TermView: NSView {
         width: Int,
         row: Int,
         attributes: Attributes,
+        ink: CGColor?,
         ctx: CGContext
     ) {
-        let (foreground, background) = theme.resolve(attributes, reversed: screen.reverseVideo)
+        let (resolved, background) = theme.resolve(attributes, reversed: screen.reverseVideo)
+        let foreground = ink ?? resolved
         let hasInk = text.contains { $0 != " " }
         if !hasInk && background == nil { return }
 
@@ -407,13 +458,23 @@ final class TermView: NSView {
     }
 
 
-    /// Highlight search results in the visible terminal text.
+    /// Highlight the matches: a solid block behind each one, and a ring around the
+    /// one the person is *on*.
+    ///
+    /// This is drawn before the text, and the text of a matched cell is then drawn
+    /// in the highlight's ink instead (`drawRow`), which is where the contrast
+    /// comes from. A wash under text that keeps its own colour is the other way to
+    /// do this, and it is the wrong way: the text was coloured to be read on the
+    /// terminal's background, and a tint of the same brightness behind it spends the
+    /// readability the theme promised in order to say "found". A block gives the
+    /// text a new background *and* a new colour, so being found never makes anything
+    /// harder to read.
+    ///
+    /// The block is inset by a point and rounded, so two matches side by side stay
+    /// two matches, and so that a highlight is not mistaken for a selection, which
+    /// is the other thing that paints rectangles over this grid.
     private func drawFindMatches(_ state: FindState, ctx: CGContext) {
         guard !state.matches.isEmpty else { return }
-        func colorWithAlpha(_ color: CGColor, alpha: CGFloat) -> CGColor {
-            guard let components = color.components, components.count >= 3 else { return color }
-            return CGColor(red: components[0], green: components[1], blue: components[2], alpha: alpha)
-        }
 
         for (index, match) in state.matches.enumerated() {
             // A match is recorded as an absolute row — scrollback included — and
@@ -422,17 +483,24 @@ final class TermView: NSView {
             let viewportRow = match.row - screen.viewportFirstRow(scrollOffset: scrollOffset)
             guard viewportRow >= 0, viewportRow < screen.rows else { continue }
 
-            let origin = cellOrigin(col: match.col, row: viewportRow)
-            let matchWidth = CGFloat(match.len) * cellWidth
+            let origin = cellOrigin(col: match.column, row: viewportRow)
+            let box = CGRect(x: origin.x + 1, y: origin.y + 1,
+                             width: max(CGFloat(match.columns) * cellWidth - 2, 2),
+                             height: max(cellHeight - 2, 2))
+            let path = CGPath(roundedRect: box, cornerWidth: 2, cornerHeight: 2,
+                              transform: nil)
+            let highlight = index == state.currentIndex ? theme.findCurrent : theme.findMatch
 
-            // Current match gets a different color
+            ctx.setFillColor(highlight.fill)
+            ctx.addPath(path)
+            ctx.fillPath()
+
             if index == state.currentIndex {
-                ctx.setFillColor(colorWithAlpha(theme.cursor, alpha: 0.4))
-            } else {
-                ctx.setFillColor(theme.foreground.copy(alpha: 0.15)!)
+                ctx.setStrokeColor(highlight.ink)
+                ctx.setLineWidth(1)
+                ctx.addPath(path)
+                ctx.strokePath()
             }
-            ctx.fill(CGRect(x: origin.x, y: origin.y,
-                            width: matchWidth, height: cellHeight))
         }
     }
 
@@ -778,27 +846,32 @@ final class TermView: NSView {
     /// State for the find overlay.
     private struct FindState {
         var query: String = ""
-        var matches: [(row: Int, col: Int, len: Int)] = []
+        var options = FindOptions.standard
+        var matches: [FindMatch] = []
         var currentIndex: Int = -1
+        /// The query was a regular expression that did not compile. Kept apart
+        /// from "no matches", because they are two different things to be told.
+        var invalidPattern = false
     }
 
     private var findState: FindState?
     var findHasMatches: Bool { findState?.matches.isEmpty == false }
     var findStatus: String {
         guard let state = findState, !state.query.isEmpty else { return "0 matches" }
+        if state.invalidPattern { return "Invalid regex" }
         guard !state.matches.isEmpty else { return "No matches" }
         return "\(state.currentIndex + 1) of \(state.matches.count)"
     }
 
     /// Open the find overlay with the given query (empty to start fresh).
-    func startFind(query: String = "") {
-        findState = FindState(query: query)
+    func startFind(query: String = "", options: FindOptions = .standard) {
+        findState = FindState(query: query, options: options)
         findAll()
         needsDisplay = true
     }
 
-    func updateFind(query: String) {
-        startFind(query: query)
+    func updateFind(query: String, options: FindOptions) {
+        startFind(query: query, options: options)
     }
 
     func endFind() {
@@ -821,50 +894,27 @@ final class TermView: NSView {
     }
 
     private func findAll() {
-        var state = findState!
-        let query = state.query.lowercased()
-        guard !query.isEmpty else {
+        guard var state = findState else { return }
+        // The matching itself is the model's, so it is asserted there: what this
+        // method owns is turning a result into what the overlay draws and which
+        // match is current.
+        switch Find.matches(in: screen, query: state.query, options: state.options) {
+        case .invalidPattern:
             state.matches = []
+            state.invalidPattern = true
             state.currentIndex = -1
-            findState = state
-            return
+        case .matches(let matches):
+            state.matches = matches
+            state.invalidPattern = false
+            state.currentIndex = matches.isEmpty ? -1 : 0
         }
-        var matches: [(row: Int, col: Int, len: Int)] = []
-
-        // Search in scrollback
-        for (rowIndex, rowCells) in screen.scrollback.enumerated() {
-            let text = Screen.text(ofLine: rowCells).lowercased()
-            var searchStart = text.startIndex
-            while let range = text[searchStart...].range(of: query) {
-                let col = text.distance(from: text.startIndex, to: range.lowerBound)
-                let len = query.count
-                matches.append((row: rowIndex, col: col, len: len))
-                searchStart = range.upperBound
-            }
-        }
-
-        // Search in live screen
-        for row in 0..<screen.rows {
-            let text = screen.rowText(row).lowercased()
-            var searchStart = text.startIndex
-            while let range = text[searchStart...].range(of: query) {
-                let col = text.distance(from: text.startIndex, to: range.lowerBound)
-                let len = query.count
-                let absoluteRow = screen.scrollback.count + row
-                matches.append((row: absoluteRow, col: col, len: len))
-                searchStart = range.upperBound
-            }
-        }
-
-        state.matches = matches
-        state.currentIndex = matches.isEmpty ? -1 : 0
         findState = state
-        if !matches.isEmpty {
-            scrollToMatch(matches[0])
+        if state.currentIndex >= 0 {
+            scrollToMatch(state.matches[state.currentIndex])
         }
     }
 
-    private func scrollToMatch(_ match: (row: Int, col: Int, len: Int)) {
+    private func scrollToMatch(_ match: FindMatch) {
         let targetRow = match.row
         // Scroll so the match is in the middle of the viewport if possible.
         let offset = max(0, targetRow - screen.rows / 2)

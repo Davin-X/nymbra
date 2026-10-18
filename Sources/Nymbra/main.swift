@@ -349,6 +349,57 @@ func runFindTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     press(20, "NYMBRA_FIND4")
     let reopened = window.findBarIsVisible && window.findStatusText == "1 of 2"
 
+    // The three switches. Each is pressed through its own action, so a switch that
+    // is not wired is a switch that never moves — which is why the read-back of the
+    // buttons is part of the assertion rather than a convenience.
+    // The bar is a stack of eight controls squeezed into a fixed width, and Auto
+    // Layout clips an over-full row rather than complaining: something would simply
+    // be missing. So the switches and the count have to be *inside* the bar, which
+    // is a thing a proof can check and a person would only notice by looking.
+    window.window.contentView?.layoutSubtreeIfNeeded()
+    let bar = window.findBarBounds
+    let controls = window.findControlFrames
+    let controlsInside = controls.count == 8
+        && controls.allSatisfy { bar.contains($0) && $0.width > 10 && $0.height > 10 }
+
+    window.search("nymbra_find4")
+    let insensitive = window.findStatusText == "1 of 2"
+
+    // Match case: the same query, and the same click, now finds nothing — which is
+    // also what says the click re-ran the search without the query being retyped.
+    window.clickFindToggle(.matchCase)
+    let caseSensitive = window.findOptionSummary == "case=1 word=0 regex=0"
+        && window.findStatusText == "No matches"
+    window.search("NYMBRA_FIND4")
+    let caseTyped = window.findStatusText == "1 of 2"
+
+    // Whole word: `NYMBRA_FIND4` runs into the digits that follow it, so it is not a
+    // word; `NYMBRA_FIND42` is.
+    window.clickFindToggle(.wholeWord)
+    let wordRejects = window.findStatusText == "No matches"
+    window.search("NYMBRA_FIND42")
+    let wordAccepts = window.findStatusText == "1 of 1"
+
+    // Regex: what the literal query could not say.
+    window.clickFindToggle(.regex)
+    window.search("NYMBRA_FIND[0-9]+")
+    let regexFinds = window.findOptionSummary == "case=1 word=1 regex=1"
+        && window.findStatusText == "1 of 2"
+
+    // A pattern that does not compile says so, and highlights nothing: an empty
+    // screen and a broken query are different things to be told.
+    window.search("NYMBRA_FIND[")
+    let invalidReported = window.findStatusText == "Invalid regex"
+        && window.focusedView?.findHasMatches == false
+
+    // Back to the loose default, and the bar finds again.
+    window.clickFindToggle(.matchCase)
+    window.clickFindToggle(.wholeWord)
+    window.clickFindToggle(.regex)
+    window.search("NYMBRA_FIND4")
+    let backToDefault = window.findOptionSummary == "case=0 word=0 regex=0"
+        && window.findStatusText == "1 of 2"
+
     // The query belongs to the pane in front, so a new tab starts its own search
     // rather than keeping the highlight of a tab nobody is looking at.
     let firstTab = window.focusedTab
@@ -379,19 +430,41 @@ func runFindTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     let highlighted = differingBytes(plain, marked)
     let leftBehind = differingBytes(plain, cleared)
 
+    // The match the keys are on has to look like the match the keys are on: the
+    // bar says `1 of 2` and the screen has to say *which*. So the same query is
+    // rendered with the first match current and with the second current, and the
+    // two have to differ — which they can only do if the current one is drawn
+    // differently from the rest. The matches are on the same row, so nothing but
+    // the highlight moves.
+    view.startFind(query: "NYMBRA_FIND4")
+    let onFirst = pixels(of: view)
+    view.findNext()
+    let onSecond = pixels(of: view)
+    view.endFind()
+    let currentIsMarked = differingBytes(onFirst, onSecond) >= 200
+
     // The extra tab's shell is a real process, so it is closed here rather than
     // left to the end of the process.
     window.selectTab(secondTab)
     window.closeFocusedTab()
     window.selectTab(firstTab)
 
-    let ok = printed && barOpened && typed && counted && nextWalked && previousWalked && escaped
-        && reopened && followedTab && followedBack && highlighted >= 1000 && leftBehind == 0
-    print("find-test\tprinted=\(flag(printed)) bar=\(flag(barOpened)) typed=\(flag(typed)) "
-          + "count=\(flag(counted)) next=\(flag(nextWalked)) previous=\(flag(previousWalked)) "
-          + "escape=\(flag(escaped)) reopened=\(flag(reopened)) "
-          + "follow=\(flag(followedTab && followedBack)) highlight=\(highlighted) "
-          + "leftBehind=\(leftBehind)")
+    let behaviour = printed && barOpened && typed && counted && nextWalked && previousWalked
+        && escaped && reopened
+    let options = insensitive && caseSensitive && caseTyped && wordRejects && wordAccepts
+        && regexFinds && invalidReported && backToDefault
+    let following = followedTab && followedBack
+    let ok = behaviour && options && following && controlsInside
+        && highlighted >= 1000 && leftBehind == 0 && currentIsMarked
+    let state = "printed=\(flag(printed)) bar=\(flag(barOpened)) typed=\(flag(typed)) "
+        + "count=\(flag(counted)) next=\(flag(nextWalked)) previous=\(flag(previousWalked)) "
+        + "escape=\(flag(escaped)) reopened=\(flag(reopened))"
+    let optionFlags = "insensitive=\(flag(insensitive)) case=\(flag(caseSensitive && caseTyped)) "
+        + "word=\(flag(wordRejects && wordAccepts)) regex=\(flag(regexFinds)) "
+        + "invalid=\(flag(invalidReported)) reset=\(flag(backToDefault))"
+    let drawn = "controls=\(flag(controlsInside)) follow=\(flag(following)) "
+        + "highlight=\(highlighted) leftBehind=\(leftBehind) current=\(flag(currentIsMarked))"
+    print("find-test\t" + state + " " + optionFlags + " " + drawn)
     return ok
 }
 
@@ -440,6 +513,22 @@ func runResizeTest(configuration: Configuration) {
               + "\(size.rows) rows x \(size.cols) cols " + (ok ? "ok" : "FAIL"))
         if !ok { failures += 1 }
     }
+
+    // Nothing at all is the one size that is not a size. The text has to still be
+    // there afterwards, and no resize may have been reported: a terminal told it
+    // has no cells drops what it was showing, and the shell inside it never
+    // learns, so it never redraws.
+    let parser = Parser(screen: screen)
+    parser.feed("NYMBRA_ZERO_SIZE_OK\r\n")
+    let paintedBefore = screen.dump()
+    let gridBefore = view.grid
+    reported = nil
+    view.setFrameSize(.zero)
+    let survived = reported == nil && view.grid == gridBefore && screen.dump() == paintedBefore
+    let stillThere = screen.dump().contains("NYMBRA_ZERO_SIZE_OK")
+    print("resize-test: zero-sized view -> no resize, text kept "
+          + (survived && stillThere ? "ok" : "FAIL"))
+    if !(survived && stillThere) { failures += 1 }
 
     if failures > 0 {
         FileHandle.standardError.write(Data("nymbra: \(failures) resize failure(s)\n".utf8))
@@ -1100,12 +1189,12 @@ func runNotifyTest() -> Bool { // swiftlint:disable:this function_body_length
         }
     }
 
-    let strip = window.tabView
+    let strip = window.tabBar
     guard window.newTab() else {
         print("notify-test\tFAIL: a second tab would not open")
         return false
     }
-    let tabs = strip.tabViewItems.compactMap { $0.identifier as? TabID }
+    let tabs = strip.tabs.map(\.identifier)
     let front = window.focusedTab
     guard tabs.count == 2, let background = tabs.first(where: { $0 != front }),
           let terminal = window.panes(in: background).values.first?.terminal else {
@@ -1161,7 +1250,7 @@ func runNotifyTest() -> Bool { // swiftlint:disable:this function_body_length
         print("notify-test\tFAIL: no window to bring a tab forward in")
         return false
     }
-    let targetTabs = target.tabView.tabViewItems.compactMap { $0.identifier as? TabID }
+    let targetTabs = target.tabBar.tabs.map(\.identifier)
     guard targetTabs.count == 2, let behind = targetTabs.first(where: { $0 != target.focusedTab }) else {
         print("notify-test\tFAIL: expected two tabs to click between, found \(targetTabs.count)")
         return false
@@ -1257,42 +1346,88 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
         }
     }
 
-    // 1. A strip that is there. The tabs live above the content, so the content
-    //    area is smaller than the view holding it, and the tab in front is placed
-    //    inside that area. That geometry is what makes a tab visible and clickable,
-    //    and it is what `noTabsNoBorder` throws away.
-    let strip = window.tabView
-    let stripVisible = strip.tabPosition == .top
-        && strip.bounds.height > strip.contentRect.height
-        && window.container.frame == strip.contentRect
+    // 1. A strip that is there, and that gives the terminal the rest of the window.
+    //    The strip takes the top edge, and the view the tabs share reaches the left,
+    //    right and bottom edges — so a terminal fills the window rather than sitting
+    //    in a frame drawn around it. Those are four edges and four assertions,
+    //    because a strip that is drawn but overlapped by the content is a strip a
+    //    person cannot click.
+    let bar = window.tabBar
+    let content = window.window.contentView?.bounds ?? .zero
+    let host = window.paneHostFrame
+    let stripVisible = bar.frame.height > 0
+        && bar.frame.width == content.width
+        && bar.frame.maxY == content.height
+        && host.minX == 0 && host.width == content.width
+        && host.minY == 0 && host.maxY == bar.frame.minY
+
+    //    And the tabs are laid out from the left, in order, with the `+` after the
+    //    last of them rather than floating in the middle of the strip: the stock
+    //    strip centres its items, which is the whole reason this one is drawn by
+    //    hand. Read off the frames, so what is asserted is where they are drawn.
+    let oneChip = bar.chipFrames.count == 1 && bar.chipFrames[0].minX <= 12
+        && bar.chipFrames[0].maxX < bar.plusFrame.minX
+        && bar.plusFrame.maxX <= bar.bounds.width
 
     //    And it is the *only* strip. macOS window tabbing would draw a second one
     //    above it, for a tab group AppKit maintains, holding none of Nymbra's tabs
-    //    — no `+` item, no title, no unread dot, and panes belonging to a different
+    //    — no `+`, no title, no unread dot, and panes belonging to a different
     //    window — which is why it is off for the application and why this window
     //    would refuse to join a group even if it were not.
     let onlyStrip = !NSWindow.allowsAutomaticWindowTabbing
         && window.window.tabbingMode == .disallowed
 
-    // 2. The `+`: an item in the strip that is not a tab. It is counted as an item
-    //    and not as a tab, and it is last, so the tabs read in the order they were
-    //    opened and the thing that makes another one is at the end of them.
-    let plusIsLast = strip.tabViewItems.last === window.plusItem
-    let plusIsNotTab = window.tabCount == strip.tabViewItems.count - 1
+    // 2. The `+`: a control in the strip that is not a tab. It is not counted as a
+    //    tab, and it is last, so the tabs read in the order they were opened and
+    //    the thing that makes another one is at the end of them.
+    let plusIsNotTab = window.tabCount == bar.tabs.count
 
     // 3. Making tabs. Each one is a fresh full-window shell, and the selection
     //    follows the one that was just made rather than staying where it was.
     let madeFirst = window.newTab()
     let madeSecond = window.newTab()
-    let ids = strip.tabViewItems.compactMap { $0.identifier as? TabID }
+    let ids = bar.tabs.map(\.identifier)
     let created = madeFirst && madeSecond && ids.count == 3
 
+    //    Moving one changes the order and nothing else: the tab in front is still
+    //    the tab that was in front.
     window.reorderTab(ids[0], to: 2)
-    let reorderedIDs = strip.tabViewItems.compactMap { $0.identifier as? TabID }
+    let reorderedIDs = bar.tabs.map(\.identifier)
     let reorderWorked = reorderedIDs == [ids[1], ids[2], ids[0]]
-        && strip.tabViewItems.last === window.plusItem
         && window.focusedTab == ids[2]
     window.reorderTab(ids[0], to: 0)
+
+    //    Three chips, in a row from the left, in order, with the `+` after the last
+    //    of them — a strip that centred its tabs would put the first one wherever
+    //    there was room, which is what the stock strip does.
+    bar.layoutSubtreeIfNeeded()
+    let chipsInOrder = bar.chipFrames.count == 3
+        && zip(bar.chipFrames, bar.chipFrames.dropFirst()).allSatisfy { $0.maxX <= $1.minX }
+        && (bar.chipFrames.last?.maxX ?? .infinity) <= bar.plusFrame.minX
+
+    //    And the `+` is pressed rather than called, so the strip's own button is
+    //    what makes the tab.
+    let madeByPlus = { bar.pressPlus(); return window.tabCount == 4 }()
+    if let extra = bar.tabs.last?.identifier, extra != ids.last { window.closeTab(extra) }
+    let closedTheNewOne = window.tabCount == 3
+
+    //    A strip with more tabs than room for them, built on its own so that
+    //    proving it costs no shells: they shrink to a floor, stay in order and do
+    //    not overlap each other — and the `+` stays inside the strip. A `+` pushed
+    //    off the edge is a strip that cannot make a tab any more.
+    let crowded = TabBarView()
+    crowded.frame = NSRect(x: 0, y: 0, width: 420, height: 30)
+    for index in 0..<40 {
+        crowded.insert(TabBarView.Tab(identifier: TabID(900 + index),
+                                      label: "tab \(index)",
+                                      content: NSView()), at: index)
+    }
+    crowded.layoutSubtreeIfNeeded()
+    let crowdedFrames = crowded.chipFrames
+    let crowdedOK = crowdedFrames.count == 40
+        && zip(crowdedFrames, crowdedFrames.dropFirst()).allSatisfy { $0.maxX <= $1.minX }
+        && crowdedFrames.allSatisfy { $0.width >= TabBarView.chipMinimumWidth - 0.01 }
+        && crowded.bounds.contains(crowded.plusFrame)
 
     // Each tab has exactly one pane and its own shell, and no two are the same
     // process — which is the property a window with one shared shell could not
@@ -1363,7 +1498,7 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     //    beside it — a dot that is set but never painted would pass the wrong
     //    test.
     func stripLabel(_ id: TabID) -> String {
-        strip.tabViewItems.first { ($0.identifier as? TabID) == id }?.label ?? ""
+        bar.tab(id)?.label ?? ""
     }
     let backWasMarked = window.isUnread(background) && stripLabel(background).contains("•")
     let frontWasClean = !window.isUnread(front) && !stripLabel(front).contains("•")
@@ -1378,11 +1513,16 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     let survivorPids = survivors.map { window.panes(in: $0).values.first!.terminal.pid }
     let outputBefore = window.panes(in: front).values.first!.terminal.screen.dump()
 
-    window.selectTab(ids[1])
-    window.closeFocusedTab()
+    //    Closed by the `×` on its own chip — the control a person actually uses,
+    //    and one the stock strip does not have. It closes *that* tab: a close
+    //    button that closed a different tab, or that moved the person into the tab
+    //    it is closing, would pass every other assertion here.
+    window.selectTab(front)
+    bar.pressClose(of: ids[1])
 
-    let remaining = Set(strip.tabViewItems.compactMap { $0.identifier as? TabID })
+    let remaining = Set(bar.tabs.map(\.identifier))
     let closedCleanly = remaining.count == 2 && remaining == Set(survivors)
+    let closedByItsOwnButton = window.focusedTab == front
     let sameShells = survivors.map { window.panes(in: $0).values.first!.terminal.pid } == survivorPids
     let stillAlive = survivorPids.allSatisfy { kill($0, 0) == 0 }
     let outputHeld = window.panes(in: front).values.first!.terminal.screen.dump() == outputBefore
@@ -1393,11 +1533,13 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     window.closeFocusedTab()
     let windowClosed = window.isClosed
 
-    print("tabs-test\tstrip=\(stripVisible ? 1 : 0) plus=\(plusIsLast && plusIsNotTab ? 1 : 0) "
+    print("tabs-test\tstrip=\(stripVisible && oneChip ? 1 : 0) "
+        + "plus=\(plusIsNotTab && chipsInOrder && madeByPlus && closedTheNewOne ? 1 : 0) "
         + "created=\(created ? 1 : 0) ownShells=\(ownShells ? 1 : 0) "
         + "independent=\(independent ? 1 : 0) switched=\(movedForward && movedBack ? 1 : 0) "
         + "title=\(titleFollows && backgroundIsQuiet ? 1 : 0) "
         + "unread=\(backWasMarked && frontWasClean && readingClearsIt ? 1 : 0) closed=\(remaining.count) "
+        + "closeButton=\(closedByItsOwnButton ? 1 : 0) crowded=\(crowdedOK ? 1 : 0) "
         + "sameShells=\(sameShells && stillAlive && outputHeld ? 1 : 0) "
         + "lastTabClosesWindow=\(windowClosed ? 1 : 0) onlyStrip=\(onlyStrip ? 1 : 0) "
         + "reordered=\(reorderWorked ? 1 : 0)")
@@ -1407,9 +1549,11 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     for tab in ids {
         for pane in window.panes(in: tab).values { pane.terminal.terminate() }
     }
-    return stripVisible && onlyStrip && plusIsLast && plusIsNotTab && created && reorderWorked && ownShells
+    return stripVisible && oneChip && onlyStrip && plusIsNotTab && chipsInOrder && madeByPlus
+        && closedTheNewOne && created && reorderWorked && ownShells && crowdedOK
         && independent && movedForward && movedBack && titleFollows && backgroundIsQuiet
-        && closedCleanly && sameShells && stillAlive && outputHeld && windowClosed
+        && closedCleanly && closedByItsOwnButton && sameShells && stillAlive && outputHeld
+        && windowClosed
 }
 
 // Mouse reporting, asserted without a window: an NSEvent is AppKit, but the

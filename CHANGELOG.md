@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed — the palette threw, and find highlighted nothing
+### Fixed — the palette threw, and find mis-measured what it found
 
 - **The command palette crashed the application the first time it was opened.**
   Each row's width was constrained to the list *before* the row had joined it, and
@@ -29,6 +29,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content size. `--window-test` shows the view exactly that size and requires a
   grid of at least 30×10, because a shell told it has one column wraps every line
   it prints into a strip one character wide.
+- **A match containing a double-width character was highlighted at half its width.**
+  A match was measured in characters and drawn in cells, and those are the same
+  number only while every character is one cell wide. On a row with CJK in it the
+  highlight covered the first half of the text it had found, and everything after
+  the match was addressed a cell off. Matching now lives in the model, and reports
+  a hit as a row, a start cell and a **cell** count: `日本語` is six cells, not
+  three. Foundation's matchers answer in UTF-16 units, so the model keeps the
+  translation back to cells and uses it for both the literal and the pattern path.
+  `FindSuite` asserts the arithmetic exactly; `--find-test` still judges the
+  drawn pixels.
+- **The find highlight was nearly invisible, and all matches looked alike.**
+  A flat translucent slab the size of the cells is the shape a selection already
+  has, and two shades of the same tint are not a difference anybody can see in a
+  theme that has one colour to give. The highlight is now a solid block drawn from
+  the theme's ANSI yellow held back toward its own background — the one colour
+  every preset is held to 4.5:1 against its background, so it is the one a
+  highlight can be sure of being visible in. The match the person is on is the
+  same yellow held back less, and ringed with its own ink: a shape difference
+  (the ring) as well as a shade difference. The block is asserted at 3:1 against
+  its ink, the two blocks are visibly different in all eight presets, and
+  `--find-test` asserts that the current match renders differently from the others.
+- **A terminal with no size on the screen.** The first tab of a window is now
+  shown *after* the window has been laid out, and a view with no size is no longer
+  treated as a terminal with no cells — because it was, and the screen was wiped
+  and stayed wiped: a shell printed its prompt into a grid of nothing, kept
+  running, and never learned that everything it drew afterwards was going nowhere.
+  The view refuses a degenerate frame, and `--resize-test` now prints text, sets
+  the frame to zero, and requires the same text back with no resize reported.
 
 ### Added — a command palette, recorded shortcuts and a useful tab strip
 
@@ -38,11 +66,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reject unmodified keys and conflicts, and let a command return to its default.
 - **Custom shells** accept an absolute path only when it names an existing,
   executable file; the selected shell is used for new sessions.
-- **Tabs** can be reordered by dragging one onto another, keeping the `+` item
-  at the end and preserving the selected terminal.
+- **Tabs are drawn by Nymbra**, not by `NSTabView`. The stock strip centres its
+  items, cannot carry a close button, and offers no menu — three things a tab
+  strip is for. The strip is now a row of chips made from the left edge inward, in
+  the order the tabs were opened, each with its own `×`, with the `+` after the
+  last of them rather than floating in the middle, and with the terminal reaching
+  the window's edges on the other three sides. Each chip is a drag handle for
+  reordering, a right-click target for the tab menu, and — through its `×` — a way
+  to close a tab you are not looking at without being moved into it.
+- `--tabs-test` reads that geometry off the frames rather than a picture: the
+  strip is the window's top edge, the tabs' host covers everything below it and
+  both side edges, one chip starts at the left, the chips do not overlap and the
+  `+` is to the right of the last of them, the `+` is *pressed* rather than called
+  (a `+` that is not wired cannot make a tab), and a background tab is closed by
+  its own `×` with the front tab unmoved.
 - **Find** is a bar over the terminal — query, match count, `↑` `↓`, `×` — opened
   by `⌘F` and gone on Escape. The query belongs to the pane in front, so switching
   tabs switches searches with it, and next/previous keep their commands.
+- **Find options**: three switches beside the query — `Aa` match case, `W` match
+  whole word, `.*` regular expression. Each is a button in its own on state, which
+  is also the state the search is run with, and moving one re-runs the search
+  without the query being retyped. A pattern that does not compile says
+  `Invalid regex` rather than "no matches": mistyping a bracket is not the same
+  answer as a word that is not on screen. Whole word means what a shell means by
+  `\b` — letter, digit or underscore. The matching is `NymbraCore.Find`, so the
+  boundaries and the cell arithmetic are asserted without a window, and the
+  switches themselves are pressed through their own actions in `--find-test`,
+  where a switch that is not wired is a switch that never moves. That proof also
+  requires each of the bar's eight controls to be inside the bar: Auto Layout
+  clips a bar that is too full rather than complaining, and a switch clipped off
+  the edge is a switch nobody can press.
 - Settings now follow the concept's page order: Appearance, Keyboard, Shell,
   Behaviour and Advanced. The Appearance page groups preview, fonts and theme
   presets; Advanced contains colour overrides and configuration access. Keyboard
@@ -57,7 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a query, the shortcut label on each, the row that is highlighted, `↑`/`↓` moving
   the highlight, Return running the highlighted row, and Escape closing it.
 - `--find-test` does the same for the find bar against a live shell — type, count,
-  next, previous, Escape, reopening, and following the focus between tabs — and
+  next, previous, Escape, reopening, each of the three options and the answer an
+  uncompilable pattern gets, and following the focus between tabs — and
   then judges the *highlight* by pixels: find off, find on, find off. The third
   render has to be byte-identical to the first, so the highlight is proven drawn
   and proven cleared rather than believed.
@@ -273,6 +327,13 @@ terminal, and no `zsh` you run by hand, is touched by it.
   finished drawing its prompt is to define its `zle-line-init` widget, and that
   is the line editor itself, the one part of a shell where being second in line
   is worse than not being there. Nothing built so far needs `B`.
+- **The generated startup files now use the user's actual `ZDOTDIR` (or `$HOME`
+  if unset) to find their startup files, rather than a value captured at Nymbra
+  launch time.** This means a user who sets `ZDOTDIR` in their environment or
+  `.zshenv` gets their startup files loaded from the right place. The environment
+  variable `NYMBRA_USER_ZDOTDIR` captures the user's `ZDOTDIR` at Nymbra launch
+  time and passes it through the generated directory to the user's actual
+  startup files.
 - Not wired to a setting yet. This lands the mechanism and the proof of it; the
   opt-in toggle is the change after this one.
 

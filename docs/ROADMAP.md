@@ -56,13 +56,13 @@ visible rather than discovered later.
 |---|---|---|
 | Copy/paste | ✅ selection (click, word, line, drag), Cmd+C and Cmd+V with bracketed paste | — |
 | Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen | — |
-| Search in scrollback | ✅ a find bar (`⌘F`) over the terminal — query, match count, `↑` `↓`, `×` — with next/previous, the query following the focused tab, and matches highlighted both in the live screen and in history; asserted by the pixels the view draws (`--find-test`), because a highlight nobody can see is invisible to every other kind of test | M3 |
-| Tabs and split panes | ✅ tabs can be reordered; right-click offers tab actions | M1.x (P0) |
+| Search in scrollback | ✅ a find bar (`⌘F`) over the terminal — query, match count, match case, whole word, regular expression, `↑` `↓`, `×` — with next/previous, `Invalid regex` reported rather than passed off as no matches, the query following the focused tab, and matches highlighted both in the live screen and in history; the matching is the model's and is asserted there (`FindSuite`: the three options, word boundaries, patterns that do not compile, and cells rather than characters), while the highlight is asserted by the pixels the view draws (`--find-test`), because a highlight nobody can see is invisible to every other kind of test. A match broken across a soft wrap is not found yet: the matcher reads one row at a time | M3 |
+| Tabs and split panes | ✅ tabs are drawn by Nymbra rather than `NSTabView` — chips from the left edge in the order they were opened, a `×` on each (closing that tab without moving the person into it), the `+` after the last of them, the terminal filling the window below, right-click for tab actions, drag to reorder; the geometry is asserted from the frames (`--tabs-test`: strip, host, order, `+`, `×`) because "the tabs are on screen where they say they are" is not a claim a unit test can make. A strip with more tabs than fit does not scroll yet | M1.x (P0) |
 | Text reflow on resize | ✅ live screen and history rewrap on resize; soft-wrapped rows are rejoined and rewrapped | — |
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
 | Settings: theme, font, colours, cursor, keybindings | ✅ navigable pages, live preview, shortcut recording, custom executable shell paths, and a readable palette | M2 |
 | Command palette | ✅ searchable commands, keyboard navigation, and live shortcut labels, driven in the proof with the key events a person sends (`--palette-test`) | M3 |
-| Shell integration: prompt/command boundaries, notifications | ⚠️ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events, a bundled zsh integration emits `A`/`C`/`D`, `behaviour.shellIntegration` turns it on, and a long command that finished in a tab you were not looking at is announced (`behaviour.notifyAfterSeconds`) and brings that tab forward when clicked, and `C` carries the command line as it was typed; `B`, the settings-window toggle, `bash`/`fish`, the timeline and the digest remain | M4 |
+| Shell integration: prompt/command boundaries, notifications | ✅ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events; bundled zsh/bash/fish integrations emit `A`/`C`/`D`, `behaviour.shellIntegration` turns it on, and a long command that finished in a tab you were not looking at is announced (`behaviour.notifyAfterSeconds`) and brings that tab forward when clicked, and `C` carries the command line as it was typed. The generated startup files use the user's actual `ZDOTDIR` (or `$HOME`) to find their startup files, captured at Nymbra launch time via `NYMBRA_USER_ZDOTDIR`. `B`, the settings-window toggle, the timeline and the digest remain | M4 |
 | Per-tab unread badge | ✅ a tab marks itself with a dot when it prints in the background, cleared by looking at it — which already covers a finished command, since the shell draws a new prompt when one ends | M4 |
 | Session recovery/persistence | ❌ | M5 |
 | Colour legibility for program-chosen colours | ✅ `Palette.readable` lifts any foreground below 4.5:1 | — |
@@ -145,7 +145,10 @@ shells that look correct cannot answer the question, and the witness that can is
 
 **Done**
 - **Tabs**, with a visible tab strip, each tab holding its own panes, and a title
-  that follows the focused shell — `⌘⇧T`, `⌘⇧W`, `⌘⇧[` / `⌘⇧]`. The per-tab
+  that follows the focused shell — `⌘⇧T`, `⌘⇧W`, `⌘⇧[` / `⌘⇧]`. The strip is drawn
+  by Nymbra (`TabBarView`): chips from the left edge in the order the tabs were
+  opened, a `×` on each, the `+` after the last of them, right-click for the tab
+  menu, drag to reorder, and the terminal filling the window below. The per-tab
   **unread badge** followed in M3 (a dot while a tab prints in the background);
   its finished-command form needs `OSC 133` and stays in M4.
 - **Horizontal and vertical splits** — `⌘D` and `⌘⇧D`, closed with `⌘W`, resized
@@ -156,6 +159,12 @@ shells that look correct cannot answer the question, and the witness that can is
 **Acceptance:** four panes, each running a different program, resized and closed
 independently, with no shared mutable state between them. — met: `make
 split-test` reports `panes=4 … jobControl=1 … closed=3 sameShells=1`.
+
+**Not done:** a strip that scrolls. Chips shrink as tabs accumulate — down to a
+minimum — and past that the last ones are clipped rather than reachable by
+scrolling, so thirty tabs are thirty tabs you can reach with `⌘⇧]` or the palette
+but not with the mouse. A horizontally scrolling strip is the fix, and it is
+worth doing before anybody has thirty tabs.
 
 ### M2 — Settings and configuration ✅
 
@@ -235,8 +244,10 @@ file is JSON, why loading can never fail, and why the model is UI-free.
   half on one row.
 - **Mouse reporting** for the modes already tracked — 1000/1002/1003, in the X10
   and SGR encodings.
-- **Search in scrollback** — a find overlay, next/previous, matches highlighted
-  in history and on the live screen.
+- **Search in scrollback** — a find overlay with match case, whole word and
+  regular expression, next/previous, matches highlighted in history and on the
+  live screen. A hit is measured in cells, not characters, so a double-width
+  character is highlighted at the width it is drawn.
 
 **Remaining**
 - Glyph atlas rasterised once per (font, size, style) via CoreText
@@ -257,12 +268,10 @@ Nymbra loads the integration itself instead of adding a line to your dotfiles.
 
 **Scope**
 - **OSC 133** shell integration: prompt start, command start, command
-  executed, exit status — the marks are parsed into `ShellMark` events, a bundled
-  zsh integration emits them, and `behaviour.shellIntegration` turns it on for
-  shells started afterwards (so far `A`/`C`/`D`: see the changelog for why `B`
-  waits, and `bash`/`fish` with it). `C` also carries the command line as it was
-  typed ([ADR-0010](adr/0010-the-command-travels-in-the-c-mark.md)) — landed, and
-  nothing displays it yet: it is what the timeline below is built on
+  executed, exit status — the marks are parsed into `ShellMark` events; bundled
+  zsh/bash/fish integrations emit `A`/`C`/`D`, and `behaviour.shellIntegration`
+  turns it on for shells started afterwards (see the changelog for why `B` waits).
+  `C` also carries the command line as it was typed ([ADR-0010](adr/0010-the-command-travels-in-the-c-mark.md)) — landed, and nothing displays it yet: it is what the timeline below is built on. The generated startup files use the user's actual `ZDOTDIR` (or `$HOME`) to find their startup files, captured at Nymbra launch time via `NYMBRA_USER_ZDOTDIR`.
 - Per-tab **unread badge** when a command finishes in a background tab — landed,
   in its *output* form (a tab marks itself with a dot while printing in the
   background, cleared by looking at it). That already covers a finished command,
@@ -275,7 +284,9 @@ Nymbra loads the integration itself instead of adding a line to your dotfiles.
   click that brings the tab forward — including while Nymbra is the application in
   front, which the system suppresses by default and which is the case that matters
 - **Command timeline**: searchable history of every command, its exit status,
-  duration and directory, stored locally
+  duration and directory, stored locally — **done**: `--timeline-test` runs a real
+  zsh with integration, records three commands, and verifies entries are stored,
+  searchable by text, filterable by status, with correct durations and directories
 - A quiet **"what needs you"** digest — three things, not a firehose
 
 **Acceptance:** run a 60-second build in a background tab; the tab badges, a
@@ -340,11 +351,11 @@ Priority: **P0** required for v0.1 · **P1** v0.1 if cheap · **P2** later.
 
 | Feature | Priority | Milestone |
 |---|---|---|
-| OSC 133 integration scripts (`zsh`/`bash`/`fish`) | P0 | M4 |
+| OSC 133 integration scripts (`zsh`/`bash`/`fish`) | P0 | M4 ✅ |
 | Exit-status indicators in the gutter | P0 | M4 |
 | Background-tab unread badge | P0 | M4 |
 | Long-command notifications | P1 | M4 |
-| Command timeline (local, searchable) | P1 | M4 |
+| Command timeline (local, searchable) | P1 | M4 ✅ |
 | "What needs you" digest | P2 | M4 |
 | Jump to previous/next prompt | P1 | M1 (data) / M4 (UX) |
 
@@ -420,3 +431,4 @@ it is probably out of scope.
 | Do we bundle a Nerd Font, or use the user's? | A native app can resolve user fonts via CoreText, so bundling may be unnecessary |
 | Do we read Ghostty-style config? | Familiarity versus taking on someone else's format. Our own documented JSON is the answer for M2; revisit once it is stable |
 | Scrollback in memory or on disk? | On disk unlocks M5 restore at the cost of complexity |
+| Should find match across a soft wrap? | The model rejoins soft-wrapped rows for reflow, so the text is there to be matched, but a hit would have to be reported as more than one cell span — one per row — and the highlight drawn per segment. Today a match broken by the wrap is not found, and that is the whole of the gap |

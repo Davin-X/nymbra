@@ -42,12 +42,14 @@ and only the part that needs a screen lives in the app.
 | Settings model, loading, validation | `NymbraCore/Configuration.swift` | "A broken settings file still starts" is a property, not a look |
 | Colour tables, contrast, 256-colour ramp | `NymbraCore/Palette.swift` | "Is this readable?" is arithmetic, and a screenshot cannot answer it |
 | Selection and text extraction | `NymbraCore/Selection.swift` | Copy has an exact expected result |
+| Matching a query against the screen | `NymbraCore/Find.swift` | "Which cells does this highlight cover?" is arithmetic over the grid — and it is decided in cells rather than characters, which is a fact a window cannot tell you and a unit test can |
 | Shell marks, the generated startup files | `NymbraCore/ShellIntegration.swift` | The snippet is text with one right answer, and ADR-0009 is easier to keep than to rediscover |
 | Whether a finished command is worth announcing | `NymbraCore/CommandAttention.swift` | A rule with a right answer, and AppKit in the way of testing it |
 | Application commands and shortcut parsing | `NymbraInput/Commands.swift`, `Shortcut.swift` | One list read by the menu bar *and* the settings window, so they cannot drift |
 | `CGColor` conversion, SGR → colours | `Nymbra/Theme.swift` | The only part that needs a graphics context |
 | Font resolution and metrics | `Nymbra/Fonts.swift` | CoreText, and shared by the grid and the preview so they cannot disagree |
 | Grid drawing, selection highlight, clipboard | `Nymbra/TermView.swift` | The renderer |
+| The tab strip: chips, their order, the `+` | `Nymbra/TabBarView.swift` | Where a tab sits and what a click on it does is layout and hit-testing, which is AppKit's half; what a tab *is* — shells, panes, attention — stays in the window and the core |
 | Windows, settings UI, menu bar, notification clicks | `Nymbra/AppController.swift`, `TerminalWindow.swift`, `SettingsWindow.swift`, `AppMenu.swift`, `Notifications.swift` | AppKit, and deliberately thin |
 | Claiming a shell's terminal | `NymbraSpawn/main.c`, `NymbraCore/PTY.swift` | It is `ioctl` and `exec`: the one thing `posix_spawn` cannot express, so it is its own program (ADR-0008) |
 
@@ -219,8 +221,11 @@ These must hold at all times. Add a test when you touch them.
    tabbing is off at launch (`NSWindow.allowsAutomaticWindowTabbing`) and every
    window is `tabbingMode = .disallowed`, because the system's tab bar is a second
    strip above the real one — for a tab group AppKit maintains — and it cannot see
-   the `+` item, the per-tab titles or the unread dots, which is all of what the
-   strip is for. `--tabs-test` asserts both halves.
+   the `+`, the per-tab titles or the unread dots, which is all of what the strip
+   is for. `--tabs-test` asserts both halves. The strip itself is drawn rather than
+   borrowed: `TabBarView` lays its chips out from the left edge, in tab order, with
+   the `+` after the last of them, because `NSTabView` centres its items, cannot
+   carry a close button and will not say where an item is.
 
 ## Threading
 
@@ -275,8 +280,10 @@ ADR-0001.
 | Attention: is a finished command worth announcing, and how long did it take | Unit tests on `CommandAttention`/`CommandTimer`, plus `--notify-test` against a real zsh for the wiring — the decision is pure, the delivery is not testable at all, and both ends of a click are values a test can hand back and forth |
 | Menu bar | `--menu-test` prints the menu and its key equivalents |
 | Command palette | `--palette-test`, driving it with real key events: a text field's own `keyDown` never sees an arrow while the field is being edited, so the keys have to be sent the way the application sends them |
-| Find: the bar's state, and the highlight under it | `--find-test` reads the state back from the bar and judges the highlight by pixels — off, on, off — because a highlight drawn where the text is then painted over it leaves every value in this table correct and the screen blank |
+| Find: the bar's state, its options, and the highlight under it | The matching is unit-tested on the model (`FindSuite`): the three options, word boundaries, a pattern that does not compile, and a hit measured in cells so a double-width character is not highlighted at half its width. `--find-test` then reads the state back from the bar, presses each of the three switches through its own action, requires all eight controls to be inside the bar — Auto Layout clips too full a bar rather than complaining — and judges the highlight by pixels, off, on, off, because a highlight drawn where the text is then painted over it leaves every value in this table correct and the screen blank. It also renders the same query with the first match current and with the second current, and asserts the two pictures differ — the current match has to look like the current match, and the only way it can is if it is drawn differently from the rest |
 | Settings window: pages, gallery, recorder rules, recorder lifetime | `--settings-test` asserts rather than prints |
+| Tabs: the strip's geometry, chip order, and what closing one does to the others | `--tabs-test`, reading frames rather than a picture: the strip is the window's top edge, the tabs' host fills the rest of the window, the chips go from the left edge in order with the `+` after them, the `+` is pressed through its own button, and a background tab closed by its own `×` leaves the front tab where it was |
+| A view with no size | `--resize-test` prints into the screen, sets the frame to zero, and requires the text back and no resize reported: a view can be sizeless for a moment while it is being put into a window, and a terminal sized to nothing drops the screen and never tells the shell |
 | Rendering | Manual, plus the find highlight's pixels in `--find-test`; a snapshot suite once Metal lands |
 
 `make check` runs everything that can run without a human.
