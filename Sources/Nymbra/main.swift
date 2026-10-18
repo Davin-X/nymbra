@@ -418,6 +418,27 @@ for warning in loaded.warnings {
 }
 let settings = loaded.configuration
 
+// MARK: - Window tabbing is off
+//
+// Nymbra has its own tabs: a strip inside the window, with the `+` item at the end
+// of it, a title per tab, the unread dot, and panes that belong to one tab and not
+// to another. macOS window tabbing draws a *second* strip, above that one, for a
+// tab group AppKit maintains — and whether it does is the system's "prefer tabs
+// when opening documents" setting, not something Nymbra gets a say in. The second
+// strip knows about none of the above. It cannot: a `+` item and an unread dot are
+// not things AppKit has ever heard of.
+//
+// The switch has to be thrown before any window exists — AppKit reads it when a
+// window is created, and the View menu's "Show Tab Bar" grows from it at launch —
+// which makes this the first thing the process says. Every window also refuses to
+// join a tab group on its own account (`TerminalWindow.init`), so the answer
+// belongs to the window and not only to the application that made it.
+//
+// The headless proofs get the same answer deliberately: a test that merged two
+// windows into one tab group because the machine's owner prefers tabs would be a
+// test passing for a reason that has nothing to do with Nymbra.
+NSWindow.allowsAutomaticWindowTabbing = false
+
 if CommandLine.arguments.contains("--pty-test") {
     runPTYTest(shell: settings.shell.path)
     exit(0)
@@ -908,6 +929,14 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
         && strip.bounds.height > strip.contentRect.height
         && window.container.frame == strip.contentRect
 
+    //    And it is the *only* strip. macOS window tabbing would draw a second one
+    //    above it, for a tab group AppKit maintains, holding none of Nymbra's tabs
+    //    — no `+` item, no title, no unread dot, and panes belonging to a different
+    //    window — which is why it is off for the application and why this window
+    //    would refuse to join a group even if it were not.
+    let onlyStrip = !NSWindow.allowsAutomaticWindowTabbing
+        && window.window.tabbingMode == .disallowed
+
     // 2. The `+`: an item in the strip that is not a tab. It is counted as an item
     //    and not as a tab, and it is last, so the tabs read in the order they were
     //    opened and the thing that makes another one is at the end of them.
@@ -1026,15 +1055,15 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
         + "title=\(titleFollows && backgroundIsQuiet ? 1 : 0) "
         + "unread=\(backWasMarked && frontWasClean && readingClearsIt ? 1 : 0) closed=\(remaining.count) "
         + "sameShells=\(sameShells && stillAlive && outputHeld ? 1 : 0) "
-        + "lastTabClosesWindow=\(windowClosed ? 1 : 0)")
+        + "lastTabClosesWindow=\(windowClosed ? 1 : 0) onlyStrip=\(onlyStrip ? 1 : 0)")
 
     // Left to the process exiting, but terminated explicitly so a failure does not
     // leave shells behind on a test runner.
     for tab in ids {
         for pane in window.panes(in: tab).values { pane.terminal.terminate() }
     }
-    return stripVisible && plusIsLast && plusIsNotTab && created && ownShells && independent
-        && movedForward && movedBack && titleFollows && backgroundIsQuiet
+    return stripVisible && onlyStrip && plusIsLast && plusIsNotTab && created && ownShells
+        && independent && movedForward && movedBack && titleFollows && backgroundIsQuiet
         && closedCleanly && sameShells && stillAlive && outputHeld && windowClosed
 }
 

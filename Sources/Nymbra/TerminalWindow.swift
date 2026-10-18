@@ -84,6 +84,11 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         window.center()
         window.isReleasedWhenClosed = false
 
+        // A window that will not be a tab of somebody else's window. Nymbra's tabs
+        // are inside it (see the note in `main.swift`); the system's would be a
+        // second strip above the real one, with none of the tabs in it.
+        window.tabbingMode = .disallowed
+
         tabView.delegate = self
         // The strip is the point. Without it a tab is something that happens *to*
         // the window: ⌘T swaps one view for another and the only evidence is the

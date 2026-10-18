@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — macOS drew a second tab strip over the real one
+
+Nymbra's tabs are its own: a strip inside the window (`TabStripView`), with the `+`
+item at the end of it, a title per tab, the unread dot, and panes that belong to
+one tab and not to another. macOS window tabbing draws a *second* strip, above
+that one, for a tab group AppKit maintains — and whether it does is the system's
+"prefer tabs when opening documents" setting, not something Nymbra gets a say in.
+The second strip knows about none of the above, and cannot be taught: a `+` item
+and an unread dot are not things AppKit has ever heard of. Two strips over one
+window, and the tabs in the lower one end up answering to the upper one.
+
+- `NSWindow.allowsAutomaticWindowTabbing = false`, thrown as the first thing the
+  process says, because AppKit reads it when a window is created and grows the
+  View menu's "Show Tab Bar" from it at launch. That pair — window tabbing and its
+  menu item — is now gone.
+- Every window also refuses to join a tab group on its own account
+  (`tabbingMode = .disallowed`), so the answer belongs to the window and not only
+  to the application that made it.
+- The headless proofs get the same answer deliberately. A test that merged two
+  windows into one tab group because the machine's owner prefers tabs would be a
+  test passing for a reason that has nothing to do with Nymbra.
+- `--tabs-test` asserts it — that the application-wide switch is off *and* that
+  the window it just made will not be a tab of somebody else's window — as
+  `onlyStrip=1`. Delete either line and it fails, which is the point: neither is
+  visible from the outside on a machine where the system preference is already
+  "only in full screen".
+
 ### Added — clicking the announcement brings the tab forward
 
 The notification from the entry below says which tab it is about, and clicking it

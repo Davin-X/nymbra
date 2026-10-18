@@ -204,6 +204,12 @@ These must hold at all times. Add a test when you touch them.
    Transposing them is silent: the shell formats its output to a width equal to
    the window's height, and every wide line wraps mid-field (invariant 6 is the
    same instinct for metrics — measure, then keep the measurement intact).
+9. **The window's tabs are Nymbra's, and there is one strip.** macOS window
+   tabbing is off at launch (`NSWindow.allowsAutomaticWindowTabbing`) and every
+   window is `tabbingMode = .disallowed`, because the system's tab bar is a second
+   strip above the real one — for a tab group AppKit maintains — and it cannot see
+   the `+` item, the per-tab titles or the unread dots, which is all of what the
+   strip is for. `--tabs-test` asserts both halves.
 
 ## Threading
 
