@@ -22,7 +22,8 @@ $ otool -L .build/release/Nymbra
 > scroll regions, the alternate screen, wrapping and resize. Full-screen
 > programs are exercised in CI by feeding real terminal output through the
 > parser. Settings are real, too: a JSON file, live preview, eight palettes,
-> recorded shortcuts, and custom shells. **⌘F** searches scrollback, **⌘⇧P**
+> recorded shortcuts, and custom shells. **⌘F** searches scrollback — with match
+> case, whole word and regular expression — **⌘⇧P**
 > opens the command palette, and tabs can be reordered. **⌘N** opens another
 > window with its own shell, and closing one is not a dead end.
 >
@@ -126,7 +127,7 @@ of its own settings file.
 | `make window-test` | Close a window, get a working shell back, and check the floor under the window |
 | `make tabs-test` | A tab strip, including tab reordering, independent switching and closing |
 | `make palette-test` | The command palette, driven with real key events |
-| `make find-test` | Find, including the highlight the view actually draws |
+| `make find-test` | Find options, and the highlight the view actually draws |
 | `make settings-test` | The settings window and the shortcut recorder's rules |
 | `make mouse-test` | Mouse reporting bytes, asserted headlessly |
 | `make shell-integration-test` | A real zsh, reporting what it is doing |
@@ -145,7 +146,7 @@ asserted in text rather than by eye:
 | `--menu-test` | The menu bar and its key equivalents |
 | `--settings-test` | The settings window's pages, gallery, and the recorder's rules and lifetime |
 | `--palette-test` | The palette's rows, highlight, arrows, Return and Escape |
-| `--find-test` | The find bar's state, and the pixels of the highlight it draws |
+| `--find-test` | The find bar's state, its three options, and the pixels of the highlight it draws |
 | `--resize-test` | The grid the view reports against the grid the shell is told |
 
 `make check` is the gate: it must pass before any change is considered done.

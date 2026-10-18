@@ -42,6 +42,7 @@ and only the part that needs a screen lives in the app.
 | Settings model, loading, validation | `NymbraCore/Configuration.swift` | "A broken settings file still starts" is a property, not a look |
 | Colour tables, contrast, 256-colour ramp | `NymbraCore/Palette.swift` | "Is this readable?" is arithmetic, and a screenshot cannot answer it |
 | Selection and text extraction | `NymbraCore/Selection.swift` | Copy has an exact expected result |
+| Matching a query against the screen | `NymbraCore/Find.swift` | "Which cells does this highlight cover?" is arithmetic over the grid — and it is decided in cells rather than characters, which is a fact a window cannot tell you and a unit test can |
 | Shell marks, the generated startup files | `NymbraCore/ShellIntegration.swift` | The snippet is text with one right answer, and ADR-0009 is easier to keep than to rediscover |
 | Whether a finished command is worth announcing | `NymbraCore/CommandAttention.swift` | A rule with a right answer, and AppKit in the way of testing it |
 | Application commands and shortcut parsing | `NymbraInput/Commands.swift`, `Shortcut.swift` | One list read by the menu bar *and* the settings window, so they cannot drift |
@@ -275,7 +276,7 @@ ADR-0001.
 | Attention: is a finished command worth announcing, and how long did it take | Unit tests on `CommandAttention`/`CommandTimer`, plus `--notify-test` against a real zsh for the wiring — the decision is pure, the delivery is not testable at all, and both ends of a click are values a test can hand back and forth |
 | Menu bar | `--menu-test` prints the menu and its key equivalents |
 | Command palette | `--palette-test`, driving it with real key events: a text field's own `keyDown` never sees an arrow while the field is being edited, so the keys have to be sent the way the application sends them |
-| Find: the bar's state, and the highlight under it | `--find-test` reads the state back from the bar and judges the highlight by pixels — off, on, off — because a highlight drawn where the text is then painted over it leaves every value in this table correct and the screen blank |
+| Find: the bar's state, its options, and the highlight under it | The matching is unit-tested on the model (`FindSuite`): the three options, word boundaries, a pattern that does not compile, and a hit measured in cells so a double-width character is not highlighted at half its width. `--find-test` then reads the state back from the bar, presses each of the three switches through its own action, requires all eight controls to be inside the bar — Auto Layout clips too full a bar rather than complaining — and judges the highlight by pixels, off, on, off, because a highlight drawn where the text is then painted over it leaves every value in this table correct and the screen blank |
 | Settings window: pages, gallery, recorder rules, recorder lifetime | `--settings-test` asserts rather than prints |
 | Rendering | Manual, plus the find highlight's pixels in `--find-test`; a snapshot suite once Metal lands |
 
