@@ -121,8 +121,8 @@ func shortcutSuite(_ h: Harness) {
     // The count is here to make "a command was added and its tests were not" a
     // failure rather than an oversight — so it is stated as the one place that
     // knows, and the loop below is what actually covers every command.
-    h.equal(Command.allCases.count, 20,
-            "there are seventeen commands (add one, and this line, deliberately)")
+    h.equal(Command.allCases.count, 21,
+            "there are twenty-one commands (add one, and this line, deliberately)")
     for command in Command.allCases {
         h.expect(command.defaultShortcut != nil, "\(command.rawValue) has a default shortcut")
         h.expect(!command.title.isEmpty, "\(command.rawValue) has a title")
@@ -156,6 +156,8 @@ func shortcutSuite(_ h: Harness) {
     h.equal(Command.shortcut(for: .paste).map { $0.text }, "cmd+v", "Paste defaults to Cmd+V")
     h.equal(Command.shortcut(for: .settings).map { $0.text }, "cmd+,",
             "Settings defaults to Cmd+,")
+    h.equal(Command.shortcut(for: .commandPalette).map { $0.text }, "cmd+shift+p",
+            "Command Palette defaults to Cmd+Shift+P")
 
     // MARK: Overrides
 

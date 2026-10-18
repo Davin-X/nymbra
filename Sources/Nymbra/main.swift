@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import NymbraCore
+import NymbraInput
 
 // MARK: - Headless proofs
 //
@@ -113,15 +114,285 @@ func runMenuTest(configuration: Configuration) {
 
 /// The settings window is the largest piece of UI in the project and the one a
 /// test runner can least easily look at, so it prints itself too: build it, list
-/// what each control loaded, and exit without showing anything.
-func runSettingsTest(configuration: Configuration) {
+/// what each control loaded, and then assert the two things about it that are
+/// easy to get wrong and impossible to see.
+///
+/// The first is the shortcut recorder's rules, which are claims: a key with no
+/// modifier is not a shortcut, and a combination another command answers to is
+/// refused with the name of that command.
+///
+/// The second is the recorder's *lifetime*. It installs a local event monitor —
+/// which sees every key the application gets — and a monitor that outlives its
+/// window swallows Escape for the whole application, in the terminal included.
+func runSettingsTest(configuration: Configuration) -> Bool {
     let controller = SettingsWindowController(configuration: configuration) { _ in }
-    print("tabs\t" + controller.tabTitles.joined(separator: ","))
+    print("pages\t" + controller.pageTitles.joined(separator: ","))
     print("appearance\t" + controller.appearanceSummary)
     print("presets\t" + controller.presetTitles.joined(separator: ","))
     for binding in controller.shortcutBindings {
         print("shortcut\t\(binding.command)\t\(binding.shortcut)")
     }
+
+    // The gallery draws its own cards, so this also says the cards exist and are
+    // holding the presets the window claims to offer.
+    let galleryFilled = controller.presetTitles.count == Configuration.Colours.Preset.allCases.count
+    let shortcutsListed = controller.shortcutBindings.count == Command.bindings().count
+
+    controller.beginRecording(.newTab)
+    let recording = controller.isRecordingShortcut
+
+    // A letter with no modifier is a letter, not a shortcut.
+    let plainKey = controller.captureShortcut(keyEvent(0, "a"))
+    let unmodifiedRefused = plainKey == nil && controller.isRecordingShortcut
+        && !controller.shortcutWarningText.isEmpty
+
+    // Command-N is New Window's, and the warning has to say whose it is.
+    let takenKey = controller.captureShortcut(keyEvent(45, "n", modifiers: .command))
+    let conflictRefused = takenKey == nil && controller.shortcutWarningText.contains("already used by")
+
+    // Control-Command-Backslash belongs to nobody, so it is recorded.
+    let freeKey = controller.captureShortcut(keyEvent(42, "\\", modifiers: [.control, .command]))
+    let accepted = freeKey == nil && !controller.isRecordingShortcut
+        && controller.shortcutBindings.contains {
+            $0.command == Command.newTab.rawValue && $0.shortcut.contains("⌃")
+        }
+
+    // And closing the window takes the monitor with it.
+    controller.beginRecording(.splitRight)
+    let recordingAgain = controller.isRecordingShortcut
+    controller.window?.close()
+    let released = !controller.isRecordingShortcut
+
+    let ok = galleryFilled && shortcutsListed && recording && unmodifiedRefused
+        && conflictRefused && accepted && recordingAgain && released
+    print("settings-test\tgallery=\(controller.presetTitles.count) shortcuts=\(controller.shortcutBindings.count) "
+          + "recording=\(flag(recording && recordingAgain)) unmodified=\(flag(unmodifiedRefused)) "
+          + "conflict=\(flag(conflictRefused)) accepted=\(flag(accepted)) "
+          + "released=\(flag(released)) ok=\(flag(ok))")
+    return ok
+}
+
+/// `1` or `0`, which is how every other proof in this file prints a yes or no.
+private func flag(_ value: Bool) -> Int { value ? 1 : 0 }
+
+/// A key event of the kind the application routes.
+///
+/// `characters` is what a field editor inserts; the modifiers are what a shortcut
+/// is made of; the window number is which field editor is listening.
+private func keyEvent(
+    _ keyCode: UInt16,
+    _ characters: String,
+    modifiers: NSEvent.ModifierFlags = [],
+    windowNumber: Int = 0
+) -> NSEvent {
+    NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+        windowNumber: windowNumber, context: nil, characters: characters,
+        charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode
+    )!
+}
+
+/// The command palette, driven with real key events rather than method calls.
+///
+/// The keys *are* the test. A text field's own `keyDown` is never called while the
+/// field is being edited — the first responder is the field's editor, an
+/// `NSTextView` — so a palette that reads arrows there is a palette whose arrows
+/// do nothing at all. Every key below is sent the way the application sends one.
+func runPaletteTest(configuration: Configuration) -> Bool {
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+
+    let commands = Command.allCases.filter { $0 != .commandPalette }
+    var chosen: Command?
+    let palette = CommandPaletteController(commands: commands, configuration: configuration) { chosen = $0 }
+    palette.show(over: nil)
+
+    func press(_ keyCode: UInt16, _ characters: String) {
+        NSApp.sendEvent(keyEvent(keyCode, characters, windowNumber: palette.window?.windowNumber ?? 0))
+    }
+
+    // The whole list, every row carrying the shortcut it answers to today.
+    let opensOnScreen = palette.isShowing
+    let listedAll = palette.visibleRows.count == commands.count
+    let showsShortcuts = palette.visibleRows.contains { $0.contains("⌘") }
+
+    // Return runs the highlighted row without any typing at all.
+    press(36, "\r")
+    let returnRanFirst = chosen == commands.first
+    let closedAfterRunning = !palette.isShowing
+
+    // Typing filters: the field editor inserts what was typed and the shortlist
+    // follows, starting at its own first row.
+    palette.show(over: nil)
+    press(17, "tab")
+    let typingArrived = palette.query == "tab"
+    let filtered = !palette.visibleRows.isEmpty
+        && palette.visibleRows.count < commands.count
+        && palette.visibleRows.allSatisfy { $0.localizedCaseInsensitiveContains("tab") }
+    let firstMatch = commands.first {
+        $0.title.localizedCaseInsensitiveContains("tab")
+            || $0.explanation.localizedCaseInsensitiveContains("tab")
+    }
+    let highlightAtTop = palette.selectedCommand == firstMatch
+
+    // ↓ and ↑ move the highlight, and ↑ comes back to where it started.
+    press(125, "\u{F701}")
+    let afterDown = palette.selectedCommand
+    press(126, "\u{F700}")
+    let arrowsMove = afterDown != nil && afterDown != firstMatch
+        && palette.selectedCommand == firstMatch
+
+    // Return runs what is highlighted now — a different row from the first one,
+    // which is what makes this more than the earlier assertion repeated.
+    chosen = nil
+    press(36, "\r")
+    let returnRanHighlighted = chosen == firstMatch
+
+    // Escape closes without running anything.
+    palette.show(over: nil)
+    chosen = nil
+    press(53, "\u{1B}")
+    let escaped = !palette.isShowing && chosen == nil
+
+    let ok = opensOnScreen && listedAll && showsShortcuts && returnRanFirst && closedAfterRunning
+        && typingArrived && filtered && highlightAtTop && arrowsMove && returnRanHighlighted && escaped
+    print("palette-test\topens=\(flag(opensOnScreen)) listed=\(flag(listedAll)) "
+          + "shortcuts=\(flag(showsShortcuts)) typed=\(flag(typingArrived)) filtered=\(flag(filtered)) "
+          + "top=\(flag(highlightAtTop)) arrows=\(flag(arrowsMove)) "
+          + "return=\(flag(returnRanFirst && returnRanHighlighted)) escape=\(flag(escaped))")
+    return ok
+}
+
+/// The view's pixels, row by row, as the renderer drew them.
+private func pixels(of view: NSView) -> [UInt8] {
+    guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return [] }
+    view.cacheDisplay(in: view.bounds, to: rep)
+    guard let data = rep.bitmapData else { return [] }
+    var bytes: [UInt8] = []
+    bytes.reserveCapacity(rep.bytesPerRow * rep.pixelsHigh)
+    for row in 0..<rep.pixelsHigh {
+        bytes.append(contentsOf: UnsafeBufferPointer(start: data + row * rep.bytesPerRow,
+                                                     count: rep.bytesPerRow))
+    }
+    return bytes
+}
+
+/// How many bytes two renders differ by. Zero means the same picture twice.
+private func differingBytes(_ one: [UInt8], _ other: [UInt8]) -> Int {
+    guard !one.isEmpty, one.count == other.count else { return -1 }
+    var count = 0
+    for index in 0..<one.count where one[index] != other[index] { count += 1 }
+    return count
+}
+
+/// Find, asserted against a live shell: the bar's state, its keys, and the
+/// highlight, which is judged by pixels.
+///
+/// The pixels are the point. A highlight drawn where the terminal's rows then
+/// paint over it is a highlight nobody can see, and no amount of *state* would
+/// ever show that: the query, the count and the current match would all be right
+/// while the screen stayed blank. So the view is rendered twice — find off, find
+/// on — and the difference has to be large enough to be the matched cells, not
+/// just the cursor. The cursor is taken out of the argument entirely by turning
+/// blinking off for this test.
+func runFindTest(configuration: Configuration) -> Bool { // swiftlint:disable:this function_body_length
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+
+    // A blinking cursor differs between two renders for reasons that have nothing
+    // to do with find, and a modal question in a headless process is a hang.
+    var quiet = configuration
+    quiet.behaviour.cursorBlinks = false
+    quiet.behaviour.confirmBeforeClosingRunningSession = false
+
+    let controller = AppController(configuration: quiet)
+    guard let window = controller.makeWindow() else {
+        print("find-test\tFAIL: no window could be made")
+        return false
+    }
+    window.window.makeKeyAndOrderFront(nil)
+
+    // Printed by an expansion, so the echoed command line does not contain what is
+    // searched for: the only two matches are the two on the output line.
+    let shell = window.panes[window.focusedPane]!.terminal
+    shell.send("echo NYMBRA_FIND$((6*7)) NYMBRA_FIND$((6*8))\n")
+    let deadline = Date().addingTimeInterval(5)
+    while Date() < deadline {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        if shell.screen.dump().contains("NYMBRA_FIND48") { break }
+    }
+    let printed = shell.screen.dump().contains("NYMBRA_FIND48")
+
+    func press(_ keyCode: UInt16, _ characters: String) {
+        NSApp.sendEvent(keyEvent(keyCode, characters, windowNumber: window.window.windowNumber))
+    }
+
+    // Type into the bar the way a person does, and read back what it says.
+    window.beginFind()
+    let barOpened = window.findBarIsVisible
+    press(20, "NYMBRA_FIND4")
+    let typed = window.findQuery == "NYMBRA_FIND4"
+    let counted = window.findStatusText == "1 of 2"
+    window.findNext()
+    let nextWalked = window.findStatusText == "2 of 2"
+    window.findPrevious()
+    let previousWalked = window.findStatusText == "1 of 2"
+
+    // Escape, while the query is live and the field is being edited, takes the
+    // query and the bar with it.
+    press(53, "\u{1B}")
+    let escaped = !window.findBarIsVisible && window.findQuery.isEmpty
+        && window.focusedView?.findStatus == "0 matches"
+
+    // Find opens again on the same query, and stays open for the rest.
+    window.beginFind()
+    press(20, "NYMBRA_FIND4")
+    let reopened = window.findBarIsVisible && window.findStatusText == "1 of 2"
+
+    // The query belongs to the pane in front, so a new tab starts its own search
+    // rather than keeping the highlight of a tab nobody is looking at.
+    let firstTab = window.focusedTab
+    let madeTab = window.newTab()
+    let secondTab = window.focusedTab
+    RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+    let followedTab = madeTab && secondTab != firstTab && window.findStatusText == "No matches"
+
+    // Back to the first tab, where the query and its highlight follow the focus.
+    window.selectTab(firstTab)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    let followedBack = window.findStatusText == "1 of 2"
+
+    guard let view = window.focusedView else {
+        print("find-test\tFAIL: no focused view")
+        return false
+    }
+
+    // The highlight, judged by what is drawn: off, on, off again. This is the pane
+    // with the matches in it — rendering the new empty tab would prove only that
+    // an empty screen matches an empty screen.
+    view.endFind()
+    let plain = pixels(of: view)
+    view.startFind(query: "NYMBRA_FIND4")
+    let marked = pixels(of: view)
+    view.endFind()
+    let cleared = pixels(of: view)
+    let highlighted = differingBytes(plain, marked)
+    let leftBehind = differingBytes(plain, cleared)
+
+    // The extra tab's shell is a real process, so it is closed here rather than
+    // left to the end of the process.
+    window.selectTab(secondTab)
+    window.closeFocusedTab()
+    window.selectTab(firstTab)
+
+    let ok = printed && barOpened && typed && counted && nextWalked && previousWalked && escaped
+        && reopened && followedTab && followedBack && highlighted >= 1000 && leftBehind == 0
+    print("find-test\tprinted=\(flag(printed)) bar=\(flag(barOpened)) typed=\(flag(typed)) "
+          + "count=\(flag(counted)) next=\(flag(nextWalked)) previous=\(flag(previousWalked)) "
+          + "escape=\(flag(escaped)) reopened=\(flag(reopened)) "
+          + "follow=\(flag(followedTab && followedBack)) highlight=\(highlighted) "
+          + "leftBehind=\(leftBehind)")
+    return ok
 }
 
 /// Prove that the view and the shell agree about the grid — and, in particular,
@@ -231,12 +502,32 @@ func runWindowTest(configuration: Configuration) -> Bool { // swiftlint:disable:
 
     let ran = screen.contains("NYMBRA_REOPEN_42")
     let alive = kill(shell.pid, 0) == 0
+
+    // A floor under the window. Without one the window shrinks to nothing, the
+    // shell is told it has one column, and every line it prints arrives wrapped
+    // into a strip one character wide — not a small window, a broken one.
+    //
+    // The clamp itself is AppKit's, for the user's drag; `setContentSize` walks
+    // straight past it, so asking the window to be small proves nothing. What can
+    // be checked is that the floor it declares is a *usable grid*: the view is
+    // shown exactly that size and asked what grid it would report. A number in a
+    // window property is not a promise; a grid is.
+    let declared = second.window.contentMinSize
+    let view = second.focusedView!
+    let saved = view.frame.size
+    view.setFrameSize(declared)
+    let floorGrid = view.grid
+    view.setFrameSize(saved)
+    let hasFloor = declared.width > 0 && declared.height > 0
+        && floorGrid.rows >= 10 && floorGrid.cols >= 30
+
     print("window-test\tclosed=\(first.isClosed) reopened=\(second !== first) "
-          + "shellAlive=\(alive) ranCommand=\(ran)")
+          + "shellAlive=\(alive) ranCommand=\(ran) minSize=\(flag(hasFloor)) "
+          + "floor=\(Int(declared.width))x\(Int(declared.height)) grid=\(floorGrid.cols)x\(floorGrid.rows)")
 
     for pane in first.panes.values { pane.terminal.terminate() }
     for pane in second.panes.values { pane.terminal.terminate() }
-    return ran && alive
+    return ran && alive && hasFloor
 }
 
 /// Four panes, four shells, and nothing shared between them.
@@ -471,8 +762,20 @@ if CommandLine.arguments.contains("--menu-test") {
 
 if CommandLine.arguments.contains("--settings-test") {
     NSApplication.shared.setActivationPolicy(.prohibited)
-    runSettingsTest(configuration: settings)
-    exit(0)
+    exit(runSettingsTest(configuration: settings) ? 0 : 1)
+}
+
+// The command palette, driven with real key events: arrows, Return and Escape are
+// received by the field *editor*, so a palette that reads them off the field is a
+// palette whose keys do nothing.
+if CommandLine.arguments.contains("--palette-test") {
+    exit(runPaletteTest(configuration: settings) ? 0 : 1)
+}
+
+// Find, end to end: a live shell prints, the bar is typed into, and the highlight
+// it draws is judged by the pixels on the screen rather than by its own state.
+if CommandLine.arguments.contains("--find-test") {
+    exit(runFindTest(configuration: settings) ? 0 : 1)
 }
 
 // The grid the shell is told about is invisible on a test runner and easy to
@@ -984,6 +1287,13 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     let ids = strip.tabViewItems.compactMap { $0.identifier as? TabID }
     let created = madeFirst && madeSecond && ids.count == 3
 
+    window.reorderTab(ids[0], to: 2)
+    let reorderedIDs = strip.tabViewItems.compactMap { $0.identifier as? TabID }
+    let reorderWorked = reorderedIDs == [ids[1], ids[2], ids[0]]
+        && strip.tabViewItems.last === window.plusItem
+        && window.focusedTab == ids[2]
+    window.reorderTab(ids[0], to: 0)
+
     // Each tab has exactly one pane and its own shell, and no two are the same
     // process — which is the property a window with one shared shell could not
     // have.
@@ -1089,14 +1399,15 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
         + "title=\(titleFollows && backgroundIsQuiet ? 1 : 0) "
         + "unread=\(backWasMarked && frontWasClean && readingClearsIt ? 1 : 0) closed=\(remaining.count) "
         + "sameShells=\(sameShells && stillAlive && outputHeld ? 1 : 0) "
-        + "lastTabClosesWindow=\(windowClosed ? 1 : 0) onlyStrip=\(onlyStrip ? 1 : 0)")
+        + "lastTabClosesWindow=\(windowClosed ? 1 : 0) onlyStrip=\(onlyStrip ? 1 : 0) "
+        + "reordered=\(reorderWorked ? 1 : 0)")
 
     // Left to the process exiting, but terminated explicitly so a failure does not
     // leave shells behind on a test runner.
     for tab in ids {
         for pane in window.panes(in: tab).values { pane.terminal.terminate() }
     }
-    return stripVisible && onlyStrip && plusIsLast && plusIsNotTab && created && ownShells
+    return stripVisible && onlyStrip && plusIsLast && plusIsNotTab && created && reorderWorked && ownShells
         && independent && movedForward && movedBack && titleFollows && backgroundIsQuiet
         && closedCleanly && sameShells && stillAlive && outputHeld && windowClosed
 }

@@ -15,6 +15,7 @@ final class AppController: NSObject {
 
     private var windows: [TerminalWindow] = []
     private var settingsController: SettingsWindowController?
+    private var commandPaletteController: CommandPaletteController?
     private var pendingSave: DispatchWorkItem?
 
     /// What the notification system talks to when a finished command has been
@@ -187,8 +188,13 @@ final class AppController: NSObject {
     /// Applying first is the point: the preview in the settings window is a real
     /// terminal changing, not a mock-up.
     func apply(_ configuration: Configuration) {
+        let shortcutsChanged = self.configuration.keyboard.overrides != configuration.keyboard.overrides
         self.configuration = configuration
         for window in windows { window.apply(configuration) }
+        commandPaletteController?.reload(configuration: configuration)
+        if shortcutsChanged {
+            AppMenu.install(controller: self, configuration: configuration)
+        }
         scheduleSave()
     }
 
@@ -249,6 +255,65 @@ final class AppController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    @objc func showCommandPalette(_ sender: Any?) {
+        let palette = commandPaletteController ?? CommandPaletteController(
+            commands: Command.allCases.filter { $0 != .commandPalette },
+            configuration: configuration
+        ) { [weak self] command in
+            self?.performPaletteCommand(command)
+        }
+        commandPaletteController = palette
+        palette.reload(configuration: configuration)
+        palette.show(over: activeWindow?.window)
+    }
+
+    private func performPaletteCommand(_ command: Command) {
+        switch command {
+        case .newWindow:
+            newWindow(nil)
+        case .newTab:
+            newTab(nil)
+        case .closeTab:
+            closeTab(nil)
+        case .nextTab:
+            nextTab(nil)
+        case .previousTab:
+            previousTab(nil)
+        case .splitRight:
+            splitRight(nil)
+        case .splitDown:
+            splitDown(nil)
+        case .closePane:
+            closePane(nil)
+        case .focusNextPane:
+            focusNextPane(nil)
+        case .focusPreviousPane:
+            focusPreviousPane(nil)
+        case .copy:
+            copy(nil)
+        case .paste:
+            paste(nil)
+        case .selectAll:
+            selectAll(nil)
+        case .clearBuffer:
+            clearBuffer(nil)
+        case .find:
+            find(nil)
+        case .findNext:
+            findNext(nil)
+        case .findPrevious:
+            findPrevious(nil)
+        case .commandPalette:
+            break
+        case .settings:
+            showSettings(nil)
+        case .increaseFontSize:
+            increaseFontSize(nil)
+        case .decreaseFontSize:
+            decreaseFontSize(nil)
+        }
+    }
+
     @objc func copy(_ sender: Any?) {
         activeWindow?.focusedView?.copySelectionToPasteboard()
     }
@@ -266,15 +331,15 @@ final class AppController: NSObject {
     }
 
     @objc func find(_ sender: Any?) {
-        activeWindow?.focusedView?.startFind()
+        activeWindow?.beginFind()
     }
 
     @objc func findNext(_ sender: Any?) {
-        activeWindow?.focusedView?.findNext()
+        activeWindow?.findNext()
     }
 
     @objc func findPrevious(_ sender: Any?) {
-        activeWindow?.focusedView?.findPrevious()
+        activeWindow?.findPrevious()
     }
 
     @objc func increaseFontSize(_ sender: Any?) {

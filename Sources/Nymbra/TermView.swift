@@ -14,6 +14,7 @@ import NymbraInput
 final class TermView: NSView {
     var onInput: (([UInt8]) -> Void)?
     var onResize: ((GridSize) -> Void)?
+    var onFindCancel: (() -> Void)?
     /// A click landed here, so this pane should take the keyboard. Altitude rather
     /// than a decision: which pane is focused is the window's to say.
     var onFocus: (() -> Void)?
@@ -257,16 +258,15 @@ final class TermView: NSView {
 
         // The selection goes under the text, so the text keeps its own colours.
         drawSelection(ctx)
+        if let state = findState, !state.query.isEmpty {
+            drawFindMatches(state, ctx: ctx)
+        }
         for (row, line) in lines.enumerated() { drawRow(line, row: row, ctx: ctx) }
 
         // The cursor belongs to the live screen, so it is not drawn while the
         // viewport sits up in scrollback.
         if scrollOffset == 0 { drawCursor(ctx) }
 
-        // Draw find overlay on top of everything.
-        if let state = findState, !state.query.isEmpty {
-            drawFindOverlay(ctx)
-        }
     }
 
     private func drawRow(_ line: [Cell], row: Int, ctx: CGContext) {
@@ -407,64 +407,26 @@ final class TermView: NSView {
     }
 
 
-    /// Draw the find overlay: a search bar with query, match count, and current
-    /// match highlight. Also highlights all matches in the visible text.
-    private func drawFindOverlay(_ ctx: CGContext) {
-        guard let state = findState, !state.query.isEmpty, !state.matches.isEmpty else { return }
-
-        // Helper to create a color with alpha (CGColor doesn't have withAlphaComponent on macOS)
+    /// Highlight search results in the visible terminal text.
+    private func drawFindMatches(_ state: FindState, ctx: CGContext) {
+        guard !state.matches.isEmpty else { return }
         func colorWithAlpha(_ color: CGColor, alpha: CGFloat) -> CGColor {
             guard let components = color.components, components.count >= 3 else { return color }
             return CGColor(red: components[0], green: components[1], blue: components[2], alpha: alpha)
         }
 
-        // Draw the search bar at the top of the viewport.
-        let barHeight: CGFloat = 28
-        let barRect = CGRect(x: 8, y: bounds.height - barHeight - 8,
-                             width: bounds.width - 16, height: barHeight)
-        ctx.setFillColor(colorWithAlpha(theme.background, alpha: 0.95))
-        ctx.fill(barRect)
-        ctx.setStrokeColor(theme.divider)
-        ctx.setLineWidth(1)
-        ctx.stroke(barRect)
-
-        // Query text
-        let queryText = "Find: \(findState!.query)"
-        let queryAttrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: theme.foreground,
-        ]
-        let queryString = NSAttributedString(string: queryText, attributes: queryAttrs)
-        let queryLine = CTLineCreateWithAttributedString(queryString)
-        ctx.textPosition = CGPoint(x: barRect.minX + 8, y: barRect.midY - 6)
-        CTLineDraw(queryLine, ctx)
-
-        // Match count and current index
-        let state2 = findState!
-        let countText = "\(state.currentIndex + 1) of \(state.matches.count)"
-        let countAttrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: theme.foreground.copy(alpha: 0.7)!,
-        ]
-        let countString = NSAttributedString(string: countText, attributes: countAttrs)
-        let countLine = CTLineCreateWithAttributedString(countString)
-        let countWidth = CTLineGetTypographicBounds(countLine, nil, nil, nil)
-        ctx.textPosition = CGPoint(x: bounds.maxX - countWidth - 16,
-                                   y: barRect.midY - 6)
-        CTLineDraw(countLine, ctx)
-
-        // Highlight all matches in the visible text.
-        let state3 = findState!
-        for (index, match) in state3.matches.enumerated() {
-            // Convert absolute row to viewport row
-            let viewportRow = match.row - (screen.scrollback.count + scrollOffset - screen.rows)
+        for (index, match) in state.matches.enumerated() {
+            // A match is recorded as an absolute row — scrollback included — and
+            // has to be moved into the viewport the same way the text is, or the
+            // highlight lands a screenful away from what it is highlighting.
+            let viewportRow = match.row - screen.viewportFirstRow(scrollOffset: scrollOffset)
             guard viewportRow >= 0, viewportRow < screen.rows else { continue }
 
             let origin = cellOrigin(col: match.col, row: viewportRow)
             let matchWidth = CGFloat(match.len) * cellWidth
 
             // Current match gets a different color
-            if index == state2.currentIndex {
+            if index == state.currentIndex {
                 ctx.setFillColor(colorWithAlpha(theme.cursor, alpha: 0.4))
             } else {
                 ctx.setFillColor(theme.foreground.copy(alpha: 0.15)!)
@@ -486,8 +448,11 @@ final class TermView: NSView {
 
         // Escape closes the find overlay.
         if findState != nil, event.keyCode == 53 { // Escape
-            findState = nil
-            needsDisplay = true
+            if let onFindCancel {
+                onFindCancel()
+            } else {
+                endFind()
+            }
             return
         }
 
@@ -818,11 +783,26 @@ final class TermView: NSView {
     }
 
     private var findState: FindState?
+    var findHasMatches: Bool { findState?.matches.isEmpty == false }
+    var findStatus: String {
+        guard let state = findState, !state.query.isEmpty else { return "0 matches" }
+        guard !state.matches.isEmpty else { return "No matches" }
+        return "\(state.currentIndex + 1) of \(state.matches.count)"
+    }
 
     /// Open the find overlay with the given query (empty to start fresh).
     func startFind(query: String = "") {
         findState = FindState(query: query)
         findAll()
+        needsDisplay = true
+    }
+
+    func updateFind(query: String) {
+        startFind(query: query)
+    }
+
+    func endFind() {
+        findState = nil
         needsDisplay = true
     }
 
@@ -843,6 +823,12 @@ final class TermView: NSView {
     private func findAll() {
         var state = findState!
         let query = state.query.lowercased()
+        guard !query.isEmpty else {
+            state.matches = []
+            state.currentIndex = -1
+            findState = state
+            return
+        }
         var matches: [(row: Int, col: Int, len: Int)] = []
 
         // Search in scrollback
@@ -879,7 +865,6 @@ final class TermView: NSView {
     }
 
     private func scrollToMatch(_ match: (row: Int, col: Int, len: Int)) {
-        let totalLines = screen.scrollback.count + screen.rows
         let targetRow = match.row
         // Scroll so the match is in the middle of the viewport if possible.
         let offset = max(0, targetRow - screen.rows / 2)

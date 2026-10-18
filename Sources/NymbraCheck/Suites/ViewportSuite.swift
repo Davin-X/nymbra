@@ -37,6 +37,20 @@ func viewportSuite(_ h: Harness) {
     h.equal(screen.displayRows(scrollOffset: 3).count, 4,
             "the viewport is always exactly the height of the screen")
 
+    // Where the viewport starts, in absolute rows. Nothing draws from this but
+    // the find highlight, which is drawn cell by cell *over* the text — so if
+    // this disagrees with `displayRows`, the highlight is painted a screenful
+    // away from the match, or not at all. That is a silent failure of exactly
+    // the kind the two functions are supposed to share an answer about.
+    let combined = screen.scrollback + screen.displayRows(scrollOffset: 0)
+    for offset in [-5, 0, 1, 3, 10_000] {
+        let drawn = screen.displayRows(scrollOffset: offset)
+        let first = screen.viewportFirstRow(scrollOffset: offset)
+        h.equal(drawn.map { Screen.text(ofLine: $0) },
+                (first..<(first + drawn.count)).map { Screen.text(ofLine: combined[$0]) },
+                "the viewport starts where it says it starts (offset \(offset))")
+    }
+
     // An empty scrollback cannot be scrolled into.
     let fresh = Screen(rows: 3, cols: 10)
     fresh.put("x")

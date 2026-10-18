@@ -69,6 +69,13 @@ final class TerminalTab {
         view.onInput = { [weak terminal] bytes in terminal?.send(bytes) }
         view.onResize = { [weak terminal] size in terminal?.resize(size) }
         view.onFocus = { [weak self] in self?.focus(id) }
+        view.onFindCancel = { [weak self, weak view] in
+            guard let self, let host = self.host else {
+                view?.endFind()
+                return
+            }
+            host.cancelFind()
+        }
         // The shell's own account of what it was asked to run and how it went.
         // It is the only way to know when a command *started* and stopped, which
         // is what a duration is: a prompt and a command's output are the same
@@ -129,6 +136,7 @@ final class TerminalTab {
         }
         container.needsDisplay = true
         host?.window.makeFirstResponder(target.view)
+        host?.focusedPaneDidChange()
         updateTitle()
     }
 

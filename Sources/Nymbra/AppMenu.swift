@@ -138,6 +138,9 @@ enum AppMenu {
         menu.addItem(command(.focusPreviousPane, #selector(AppController.focusPreviousPane(_:)),
                              target: controller, configuration: configuration))
         menu.addItem(.separator())
+        menu.addItem(command(.commandPalette, #selector(AppController.showCommandPalette(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(.separator())
         menu.addItem(command(.increaseFontSize, #selector(AppController.increaseFontSize(_:)),
                              target: controller, configuration: configuration))
         menu.addItem(command(.decreaseFontSize, #selector(AppController.decreaseFontSize(_:)),

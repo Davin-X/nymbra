@@ -1073,10 +1073,21 @@ public final class Screen {
         }
         guard scrollOffset > 0, !scrollback.isEmpty else { return live }
 
-        let back = min(scrollOffset, scrollback.count)
         let combined = scrollback + live
-        let bottom = combined.count - back
-        return Array(combined[max(0, bottom - rows)..<bottom])
+        let first = viewportFirstRow(scrollOffset: scrollOffset)
+        return Array(combined[first..<Swift.min(first + rows, combined.count)])
+    }
+
+    /// The absolute row of the scrollback-plus-live screen that the viewport's
+    /// first line is showing.
+    ///
+    /// Anything that has to line up with what a view draws — the find highlight
+    /// most of all, which is painted cell by cell over the text — has to agree
+    /// with this one number rather than work it out again. Getting it wrong by
+    /// `rows` is invisible in the model and unmissable once rendered: the
+    /// highlight is drawn a screenful away from the match, or dropped entirely.
+    public func viewportFirstRow(scrollOffset: Int) -> Int {
+        scrollback.count - Swift.min(Swift.max(scrollOffset, 0), scrollback.count)
     }
 
     public func dump(trim: Bool = true) -> String {
