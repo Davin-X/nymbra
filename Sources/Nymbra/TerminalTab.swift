@@ -55,8 +55,13 @@ final class TerminalTab {
     }
 
     private func makePane(id: PaneID) throws -> Pane {
+        // The integration is asked for here, once per shell, rather than held
+        // on the tab: it is the environment the shell is born with, and a shell
+        // already running cannot be given a new one. A settings change therefore
+        // reaches panes and tabs opened after it.
         let terminal = try Terminal(size: GridSize(rows: 24, cols: 80),
-                                    shell: configuration.shell.path)
+                                    shell: configuration.shell.path,
+                                    integration: configuration.shellIntegration())
         let view = TermView(frame: container.bounds,
                             screen: terminal.screen,
                             configuration: configuration)
