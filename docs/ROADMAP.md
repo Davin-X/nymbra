@@ -61,7 +61,7 @@ visible rather than discovered later.
 | Text reflow on resize | ✅ live screen and history rewrap on resize; soft-wrapped rows are rejoined and rewrapped | — |
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
 | Settings: theme, font, colours, cursor, keybindings | ✅ one JSON file, a settings window with live preview, and a readable palette | M2 |
-| Shell integration: prompt/command boundaries, notifications | ⚠️ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events, a bundled zsh integration emits `A`/`C`/`D`, `behaviour.shellIntegration` turns it on, and a long command that finished in a tab you were not looking at is announced (`behaviour.notifyAfterSeconds`) and brings that tab forward when clicked; `B`, the settings-window toggle, `bash`/`fish`, the timeline and the digest remain | M4 |
+| Shell integration: prompt/command boundaries, notifications | ⚠️ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events, a bundled zsh integration emits `A`/`C`/`D`, `behaviour.shellIntegration` turns it on, and a long command that finished in a tab you were not looking at is announced (`behaviour.notifyAfterSeconds`) and brings that tab forward when clicked, and `C` carries the command line as it was typed; `B`, the settings-window toggle, `bash`/`fish`, the timeline and the digest remain | M4 |
 | Per-tab unread badge | ✅ a tab marks itself with a dot when it prints in the background, cleared by looking at it — which already covers a finished command, since the shell draws a new prompt when one ends | M4 |
 | Session recovery/persistence | ❌ | M5 |
 | Colour legibility for program-chosen colours | ✅ `Palette.readable` lifts any foreground below 4.5:1 | — |
@@ -260,7 +260,9 @@ Nymbra loads the integration itself instead of adding a line to your dotfiles.
   executed, exit status — the marks are parsed into `ShellMark` events, a bundled
   zsh integration emits them, and `behaviour.shellIntegration` turns it on for
   shells started afterwards (so far `A`/`C`/`D`: see the changelog for why `B`
-  waits, and `bash`/`fish` with it)
+  waits, and `bash`/`fish` with it). `C` also carries the command line as it was
+  typed ([ADR-0010](adr/0010-the-command-travels-in-the-c-mark.md)) — landed, and
+  nothing displays it yet: it is what the timeline below is built on
 - Per-tab **unread badge** when a command finishes in a background tab — landed,
   in its *output* form (a tab marks itself with a dot while printing in the
   background, cleared by looking at it). That already covers a finished command,

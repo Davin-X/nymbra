@@ -132,11 +132,13 @@ child has opened the device would take that for the shell having exited
 A terminal cannot normally tell a prompt from a command's output, because they are
 the same bytes. `OSC 133` is the shell saying which is which — and it is the only
 way to know *how long* something took, since a duration cannot be read out of a
-stream.
+stream. It is also the only way to know *what* ran: the terminal did not type it
+and cannot read it back off a screen it echoed.
 
 ```
 zsh snippet ──OSC 133──▶  VT parser ──▶ Terminal.onShellMark
                                               │  A / B / C / D
+                                              │  C carries cmdline_url=<the line>
                                               ▼
                                         CommandTimer          (C→D is the duration)
                                               │  seconds, status
@@ -149,6 +151,15 @@ zsh snippet ──OSC 133──▶  VT parser ──▶ Terminal.onShellMark
                                                                         ▼
                                                           NotificationRouter ──▶ the tab
 ```
+
+The command travels in the mark as the line *as typed*, percent-encoded
+(`ShellMark.commandExecuted`). It is not the command that ran — aliases are not
+expanded and a variable is recorded as it was written — and the shell says so by
+construction. Encoding rather than quoting, because a command is arbitrary bytes:
+a BEL or an ESC in it would end the sequence before the terminal had finished
+reading it. Nothing reads this payload yet; it is the half of the command timeline
+that has to exist before anything can show it, and `--shell-integration-test`
+asserts it against a real zsh in the meantime.
 
 Marks cross the same delivery queue as screen updates, so `onShellMark` fires on
 the main queue and the rule runs there too. What the decision needs that the shell

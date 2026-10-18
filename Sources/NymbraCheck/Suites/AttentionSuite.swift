@@ -88,7 +88,7 @@ func attentionSuite(_ h: Harness) {
              "a finish with nothing started times nothing rather than inventing a duration")
 
     timer = CommandTimer()
-    h.expect(timer.note(.commandExecuted, now: t0) == nil,
+    h.expect(timer.note(.commandExecuted(nil), now: t0) == nil,
              "a command starting is not a command finishing")
     h.equal(timer.note(.commandFinished(0), now: t0.addingTimeInterval(12)),
             CommandTimer.Finished(status: 0, seconds: 12),
@@ -97,22 +97,22 @@ func attentionSuite(_ h: Harness) {
              "the same finish is not reported twice")
 
     timer = CommandTimer()
-    _ = timer.note(.commandExecuted, now: t0)
+    _ = timer.note(.commandExecuted(nil), now: t0)
     h.equal(timer.note(.commandFinished(7), now: t0.addingTimeInterval(3)),
             CommandTimer.Finished(status: 7, seconds: 3),
             "a failing command is timed and carries its status")
 
     timer = CommandTimer()
-    _ = timer.note(.commandExecuted, now: t0)
+    _ = timer.note(.commandExecuted(nil), now: t0)
     _ = timer.note(.commandFinished(0), now: t0.addingTimeInterval(5))
-    _ = timer.note(.commandExecuted, now: t0.addingTimeInterval(20))
+    _ = timer.note(.commandExecuted(nil), now: t0.addingTimeInterval(20))
     h.equal(timer.note(.commandFinished(0), now: t0.addingTimeInterval(22)),
             CommandTimer.Finished(status: 0, seconds: 2),
             "each command is timed from its own start, not the first one's")
 
     timer = CommandTimer()
-    h.expect(timer.note(.commandExecuted, now: t0) == nil, "a command starts")
-    h.expect(timer.note(.commandExecuted, now: t0.addingTimeInterval(30)) == nil,
+    h.expect(timer.note(.commandExecuted(nil), now: t0) == nil, "a command starts")
+    h.expect(timer.note(.commandExecuted(nil), now: t0.addingTimeInterval(30)) == nil,
              "a second start with no finish in between replaces the first")
     h.equal(timer.note(.commandFinished(nil), now: t0.addingTimeInterval(31)),
             CommandTimer.Finished(status: nil, seconds: 1),

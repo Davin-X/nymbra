@@ -87,9 +87,49 @@ func parserSuite(_ h: Harness) {
     do {
         let t = Recorder()
         t.feed("\u{1B}]133;A\u{07}$ \u{1B}]133;B\u{07}ls\u{1B}]133;C\u{07}file\u{1B}]133;D;0\u{07}")
-        h.equal(t.marks, [.promptStart, .commandStart, .commandExecuted, .commandFinished(0)],
+        h.equal(t.marks, [.promptStart, .commandStart, .commandExecuted(nil), .commandFinished(0)],
                 "a whole command's marks arrive in order, with its exit status")
         h.equal(t.row(0), "$ lsfile", "no shell mark reaches the screen")
+    }
+
+    do {
+        // The command itself, in the form the shells and terminals that report one
+        // already share: `cmdline_url=<percent-encoded>`.
+        let t = Recorder()
+        t.feed("\u{1B}]133;C;cmdline_url=ls%20-la\u{07}out\u{1B}]133;D;0\u{07}")
+        h.equal(t.marks, [.commandExecuted("ls -la"), .commandFinished(0)],
+                "the command travels with the mark and is decoded from it")
+        h.equal(t.row(0), "out", "the command in the mark is not drawn on the screen")
+    }
+
+    do {
+        let t = Recorder()
+        // Every byte the encoder escapes, coming back as itself. The BEL and ESC
+        // are what would otherwise end the sequence early; the tab, newline,
+        // carriage return and delete are control bytes a sequence does not carry.
+        t.feed("\u{1B}]133;C;cmdline_url=echo%20a%3Bb%25%07%1B%09%0A%0D%7Fz\u{07}")
+        h.equal(t.marks, [.commandExecuted("echo a;b%\u{07}\u{1B}\t\n\r\u{7F}z")],
+                "an escaped control byte, semicolon, space and percent come back as themselves")
+    }
+
+    do {
+        let t = Recorder()
+        t.feed("\u{1B}]133;C\u{07}")
+        h.equal(t.marks, [.commandExecuted(nil)], "a bare C says a command ran, not which one")
+        t.feed("\u{1B}]133;C;cmdline_url=\u{07}")
+        h.equal(t.marks.last, .commandExecuted(nil), "an empty command is no command")
+        t.feed("\u{1B}]133;C;cmdline_url=ls;other=1\u{07}")
+        h.equal(t.marks.last, .commandExecuted("ls"),
+                "another key in the mark is not part of the command")
+        t.feed("\u{1B}]133;C;something_else=ls\u{07}")
+        h.equal(t.marks.last, .commandExecuted(nil), "a key we do not know is not the command")
+    }
+
+    do {
+        let t = Recorder()
+        t.feed("\u{1B}]133;C;cmdline_url=a%ZZb%2c%4\u{07}")
+        h.equal(t.marks, [.commandExecuted("a%ZZb,%4")],
+                "malformed escapes are left as they are rather than guessed at")
     }
 
     do {

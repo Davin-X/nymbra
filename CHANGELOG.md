@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the command travels with the shell's mark
+
+`OSC 133 ; C` said "a command is about to run" and nothing about which. It now
+carries the line as it was typed, percent-encoded — the last thing the command
+timeline needs, and the first thing it needed. A terminal cannot read a command
+back off a screen the shell echoed it to: the echo is the line editor redrawing its
+buffer, complete with the keystrokes that were deleted afterwards. So the shell has
+to say it (ADR-0010).
+
+- The wire form is `cmdline_url=<percent-encoded line>`, a key in the mark's
+  key/value list — the shape kitty documents and Contour reads, so what Nymbra
+  records is legible to them and theirs to Nymbra. It costs one line of parser to
+  speak the same language as everybody else.
+- Percent-encoded rather than quoted, because a command is arbitrary bytes. A BEL in
+  it would end the sequence before the terminal had finished reading it, and an ESC
+  would start the `ESC \` terminator this terminal also accepts. Eight bytes are
+  rewritten — BEL, ESC, `;`, `%`, and the tab, newline, carriage return and delete
+  that a sequence does not carry — and everything else, UTF-8 included, arrives
+  exactly as typed.
+- The line is what was **typed**, not what ran: aliases unexpanded, a variable
+  recorded as the name that was written. A terminal that showed you the expanded
+  command would be showing you something nobody wrote.
+- The escaping is eight parameter substitutions in the shell, assigning to a
+  variable rather than printing it, because `$(...)` forks a subshell — and this
+  runs on every command a person runs.
+- A bare `C` — what every snippet before this one sent — is `nil` rather than an
+  empty command, so a shell that reports its marks and not its commands keeps
+  working. Replacing the snippet is not required to get the marks you already had.
+- The decoder is total: a `%` with no two hex digits after it is a `%`, and bytes
+  that are not UTF-8 become the replacement character instead of an error. It runs on
+  whatever a shell sends.
+- **Nothing shows the commands yet.** This is the half of the timeline that has to
+  exist before anything can display one, so the only code that looks at the payload
+  today is the test.
+- `--shell-integration-test` asserts it against a real zsh, and it is the first
+  assertion here made of a **round trip**: the line it types contains a quote, a `$`,
+  a percent sign, a semicolon and a backslash, and that same line has to come back
+  out of the mark. The encoder's awkward bytes are read off the screen instead,
+  because the shell is the half that produces them — the BEL, ESC, tab, newline,
+  carriage return and delete come back as `%07`, `%1B`, `%09`, `%0A`, `%0D` and
+  `%7F`.
+- 8 new checks in the harness (1354).
+
 ### Fixed — macOS drew a second tab strip over the real one
 
 Nymbra's tabs are its own: a strip inside the window (`TabStripView`), with the `+`

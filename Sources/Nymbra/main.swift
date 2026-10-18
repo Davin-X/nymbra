@@ -617,10 +617,26 @@ func runShellIntegrationTest() -> Bool {
             return false
         }
 
+        // The line as it will be typed, written once and used for both halves of
+        // what follows — what it prints, and what the marked command has to say it
+        // was — so that a typo cannot make the test agree with itself about a
+        // command nobody sent.
+        let commandLine = "__nymbra_encode $'a\\ab\\ec\\nd\\re\\tf\\x7fg%d;h'; "
+            + "printf 'nymbra-ran=%s encoded=%s\\n' \"$NYMBRA_TEST_RC\" \"$__nymbra_encoded\""
+
         // `printf` with the value expanded, rather than `echo "$VAR"`: the pty
         // echoes what is typed back at us, so a marker that also appeared in the
         // command line would be satisfied by the echo alone.
-        terminal.send("printf 'nymbra-ran=%s\\n' \"$NYMBRA_TEST_RC\"\n")
+        //
+        // One line, doing the work of two, because it is typed once and asserted
+        // twice. What it prints proves the encoder in the shell: the BEL, ESC, tab,
+        // newline, carriage return, delete, percent and semicolon in that first
+        // argument come back as `%07`, `%1B`, `%09`, `%0A`, `%0D`, `%7F`, `%25` and
+        // `%3B`. And what it is, as typed, is what has to come back through the `C`
+        // mark: a line with quotes, a `$`, a percent sign, a semicolon and a
+        // backslash in it, none of which the terminal could have read off the screen
+        // it was echoed to.
+        terminal.send(commandLine + "\n")
         guard finished.wait(timeout: .now() + 20) == .success else {
             reportShellIntegration(terminal, queue: queue, log: log,
                                    reason: "zsh reported no finished command")
@@ -653,18 +669,36 @@ func runShellIntegrationTest() -> Bool {
 
         let marks = log.all
         let prompted = marks.contains(.promptStart)
-        let executed = marks.contains(.commandExecuted)
+        let executed = marks.contains { if case .commandExecuted = $0 { return true } else { return false } }
         let status = marks.contains(.commandFinished(0))
         let failure = marks.contains(.commandFinished(7))
         let userConfig = text.contains("nymbra-ran=loaded")
+        // The encoder's half, read off the screen: every byte it exists for comes
+        // back escaped, and everything else is left exactly as it was.
+        let encoding = text.contains("encoded=a%07b%1Bc%0Ad%0De%09f%7Fg%25d%3Bh")
+        // And the decoder's half: the command as typed, recovered from the mark
+        // rather than from anything the shell printed.
+        let recorded = marks.compactMap { mark -> String? in
+            if case let .commandExecuted(command) = mark { return command } else { return nil }
+        }
+        // Every `C` here comes from a shell that was taught to report, so none may
+        // arrive without its command: a payload dropped on the way through would
+        // leave "a command ran" looking correct, which is exactly what `executed`
+        // above only appears to check.
+        let everyMarkCarriedOne = !recorded.isEmpty && !marks.contains { mark in
+            if case .commandExecuted(nil) = mark { return true } else { return false }
+        }
+        let command = recorded.contains(commandLine) && everyMarkCarriedOne
 
         print("shell-integration-test\tmarks=\(marks.count)"
               + " prompt=\(prompted ? 1 : 0)"
               + " executed=\(executed ? 1 : 0)"
               + " finished=\(status ? 1 : 0)"
               + " failed=\(failure ? 1 : 0)"
-              + " userConfig=\(userConfig ? 1 : 0)")
-        return prompted && executed && status && failure && userConfig
+              + " userConfig=\(userConfig ? 1 : 0)"
+              + " command=\(command ? 1 : 0)"
+              + " encoding=\(encoding ? 1 : 0)")
+        return prompted && executed && status && failure && userConfig && command && encoding
     } catch {
         FileHandle.standardError.write(Data("nymbra: shell-integration-test \(error)\n".utf8))
         return false
