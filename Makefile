@@ -19,6 +19,7 @@ help:
 	@echo "make resize-test - proof that the view and the shell agree on the grid"
 	@echo "make window-test - close a window, get a working one back"
 	@echo "make tabs-test   - make, switch and close tabs without a window"
+	@echo "make mouse-test  - mouse reporting bytes, asserted headlessly"
 	@echo "make check       - everything CI runs (build + tests + headless proofs)"
 	@echo "make clean       - remove build output"
 
@@ -77,8 +78,10 @@ window-test: build
 
 tabs-test: build
 	"$(bin)/Nymbra" --tabs-test
+mouse-test: build
+	"$(bin)/Nymbra" --mouse-test
 
-check: lint test pty-test screen-test resize-test window-test tabs-test
+check: lint test pty-test screen-test resize-test window-test tabs-test mouse-test
 
 clean:
 	swift package clean

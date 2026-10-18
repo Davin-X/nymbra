@@ -479,6 +479,10 @@ if CommandLine.arguments.contains("--tabs-test") {
     exit(runTabsTest(configuration: settings) ? 0 : 1)
 }
 
+if CommandLine.arguments.contains("--mouse-test") {
+    exit(runMouseTest() ? 0 : 1)
+}
+
 /// Tabs, the way they are actually used: a strip that is there to be seen and
 /// clicked, a `+` that makes a tab, and a shell in each that no other tab can
 /// disturb.
@@ -638,8 +642,70 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
         && closedCleanly && sameShells && stillAlive && outputHeld && windowClosed
 }
 
-// Temporary: open a window with three named tabs and hold it open so a
+// Mouse reporting, asserted without a window: an NSEvent is AppKit, but the
+// bytes it becomes are not, so the encoding is a pure function of the screen's
+// mode and encoding and the event's parameters.
+func runMouseTest() -> Bool {
+    var failures = 0
+    func expect(_ condition: Bool, _ what: String) {
+        if !condition { failures += 1; print("mouse-test\tFAIL: \(what)") }
+    }
+
+    // Off reports nothing, whatever the event.
+    expect(Screen.mouseReport(mode: .off, encoding: .sgr, button: 0, col: 0, row: 0) == nil,
+           "an off terminal reports no mouse bytes")
+
+    // Click mode, left press at (3, 4): SGR.
+    let leftPress = Screen.mouseReport(mode: .click, encoding: .sgr, button: 0, col: 3, row: 4)
+    expect(leftPress == [0x1B, 0x5B, 0x3C] + Array("0;36;37".utf8) + [0x4D],
+           "a left press in SGR is ESC [ < 0 ; col+33 ; row+33 M")
+
+    // Release uses the lowercase marker.
+    let leftRelease = Screen.mouseReport(mode: .click, encoding: .sgr, button: 0, col: 3, row: 4, isRelease: true)
+    expect(leftRelease == [0x1B, 0x5B, 0x3C] + Array("0;36;37".utf8) + [0x6D],
+           "and a release is the same thing with a lowercase m")
+
+    // X10 has no release and no motion: a release is nothing.
+    expect(Screen.mouseReport(mode: .click, encoding: .x10, button: 0, col: 3, row: 4, isRelease: true) == nil,
+           "X10 has no release report")
+
+    // Modifiers are OR'd into the button byte: shift 0x08, option 0x10, control 0x20.
+    let modified = Screen.mouseReport(mode: .click, encoding: .sgr, button: 0, col: 0, row: 0,
+                                     shift: true, option: true, control: true)
+    expect(modified == [0x1B, 0x5B, 0x3C] + Array("56;33;33".utf8) + [0x4D],
+           "shift, option and control are OR'd into the button byte")
+
+    // Motion in click mode is suppressed.
+    expect(Screen.mouseReport(mode: .click, encoding: .sgr, button: 0, col: 0, row: 0, isMotion: true) == nil,
+           "click mode reports no motion")
+
+    // Motion in motion mode, no button: the motion bit (0x40) is set.
+    let motion = Screen.mouseReport(mode: .motion, encoding: .sgr, button: 3, col: 1, row: 2, isMotion: true)
+    expect(motion == [0x1B, 0x5B, 0x3C] + Array("67;34;35".utf8) + [0x4D],
+           "a bare move in any-event mode carries the motion bit and an uppercase M")
+
+    // Wheel: buttons 4 and 5, always a press.
+    let wheel = Screen.mouseReport(mode: .click, encoding: .sgr, button: 0, col: 0, row: 0,
+                                  isScrollWheel: true, scrollDeltaY: -1)
+    expect(wheel == [0x1B, 0x5B, 0x3C] + Array("4;33;33".utf8) + [0x4D],
+           "a wheel up is button 4")
+
+    // X10 press encoding.
+    let x10 = Screen.mouseReport(mode: .click, encoding: .x10, button: 0, col: 1, row: 2)
+    expect(x10 == [0x1B, 0x5B, 0x4D, 0x20, 0x22, 0x23],
+           "X10 is ESC [ M followed by three bytes offset by 32")
+
+    print("mouse-test\t" + (failures == 0 ? "ok" : "FAIL"))
+    return failures == 0
+}
+
+// Dispatch for --mouse-test
+if CommandLine.arguments.contains("--mouse-test") {
+    exit(runMouseTest() ? 0 : 1)
+}
+
 let app = NSApplication.shared
+app.setActivationPolicy(.regular)
 app.setActivationPolicy(.regular)
 
 let controller = AppController(configuration: settings)
