@@ -3,7 +3,7 @@
 # asking *inside* a recipe can race the build that just finished.
 bin = $(shell swift build -c release --show-bin-path 2>/dev/null)
 
-.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test tabs-test mouse-test shell-integration-test lint architecture check clean
+.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test tabs-test mouse-test shell-integration-test notify-test lint architecture check clean
 
 help:
 	@echo "make build       - release build"
@@ -21,6 +21,7 @@ help:
 	@echo "make tabs-test   - make, switch and close tabs without a window"
 	@echo "make mouse-test  - mouse reporting bytes, asserted headlessly"
 	@echo "make shell-integration-test - a real zsh, reporting what it is doing"
+	@echo "make notify-test - a long command in a background tab, announced"
 	@echo "make check       - everything CI's check job runs (guard + build + tests + proofs)"
 	@echo "make clean       - remove build output"
 
@@ -105,7 +106,13 @@ mouse-test: build
 shell-integration-test: build
 	"$(bin)/Nymbra" --shell-integration-test
 
-check: architecture test pty-test screen-test resize-test window-test tabs-test mouse-test shell-integration-test
+# A notification when a command that took a while finishes. The duration is what
+# the shell's own marks measure, so this one needs a real zsh as well. Nothing is
+# shown, and nothing is actually posted — see the seam in the test.
+notify-test: build
+	"$(bin)/Nymbra" --notify-test
+
+check: architecture test pty-test screen-test resize-test window-test tabs-test mouse-test shell-integration-test notify-test
 
 clean:
 	swift package clean

@@ -42,6 +42,8 @@ and only the part that needs a screen lives in the app.
 | Settings model, loading, validation | `NymbraCore/Configuration.swift` | "A broken settings file still starts" is a property, not a look |
 | Colour tables, contrast, 256-colour ramp | `NymbraCore/Palette.swift` | "Is this readable?" is arithmetic, and a screenshot cannot answer it |
 | Selection and text extraction | `NymbraCore/Selection.swift` | Copy has an exact expected result |
+| Shell marks, the generated startup files | `NymbraCore/ShellIntegration.swift` | The snippet is text with one right answer, and ADR-0009 is easier to keep than to rediscover |
+| Whether a finished command is worth announcing | `NymbraCore/CommandAttention.swift` | A rule with a right answer, and AppKit in the way of testing it |
 | Application commands and shortcut parsing | `NymbraInput/Commands.swift`, `Shortcut.swift` | One list read by the menu bar *and* the settings window, so they cannot drift |
 | `CGColor` conversion, SGR → colours | `Nymbra/Theme.swift` | The only part that needs a graphics context |
 | Font resolution and metrics | `Nymbra/Fonts.swift` | CoreText, and shared by the grid and the preview so they cannot disagree |
@@ -124,6 +126,38 @@ descriptor is inherited rather than reopened by name, because a master with no
 slave open reports end of file *immediately* — a reader that starts before the
 child has opened the device would take that for the shell having exited
 (ADR-0008).
+
+### Attention: what a shell reports about itself
+
+A terminal cannot normally tell a prompt from a command's output, because they are
+the same bytes. `OSC 133` is the shell saying which is which — and it is the only
+way to know *how long* something took, since a duration cannot be read out of a
+stream.
+
+```
+zsh snippet ──OSC 133──▶  VT parser ──▶ Terminal.onShellMark
+                                              │  A / B / C / D
+                                              ▼
+                                        CommandTimer          (C→D is the duration)
+                                              │  seconds, status
+                                              ▼
+                                        CommandAttention      (speak, or stay quiet?)
+                                              │  an Announcement
+                                              ▼
+                                        TerminalWindow.deliver ──▶ Notification Centre
+```
+
+Marks cross the same delivery queue as screen updates, so `onShellMark` fires on
+the main queue and the rule runs there too. What the decision needs that the shell
+cannot know — whether the tab is in front, in the key window, in an active
+application, and what the tab is called — is gathered in `TerminalWindow`. What it
+needs that is arithmetic lives in `CommandAttention`, with no AppKit in sight.
+
+Delivery is deliberately the one part with no test. `UNUserNotificationCenter`
+*aborts* outside an application bundle rather than returning an error — which is
+what the test binary and `swift run` are — so `deliver` is a seam with a real
+default that the tests replace. The alternative is a rule that could only be
+checked by a human watching for a banner.
 
 ## Invariants
 
@@ -208,6 +242,8 @@ ADR-0001.
 | PTY | `--pty-test` smoke test in CI |
 | Controlling terminal and job control | `PTYSuite` asks the kernel, headlessly: `tcgetpgrp` for the shell, a job's own process group, whether Ctrl+C ends it and hands the terminal back, and whether a program that never touches its terminal has one |
 | Emulation, end to end | `--screen-test` feeds real shell output through the parser in CI |
+| Shell integration | Unit tests on the generated files and the parser, plus `--shell-integration-test` against a real zsh |
+| Attention: is a finished command worth announcing, and how long did it take | Unit tests on `CommandAttention`/`CommandTimer`, plus `--notify-test` against a real zsh for the wiring — the decision is pure, the delivery is not testable at all |
 | Menu bar | `--menu-test` prints the menu and its key equivalents |
 | Rendering | Manual + snapshot once Metal lands |
 

@@ -95,6 +95,13 @@ public struct Configuration: Codable, Equatable, Sendable {
         public static let defaultScrollbackLines = 10_000
         public static let scrollbackRange = 0...1_000_000
 
+        /// Ten seconds: see `notifyAfterSeconds`.
+        public static let defaultNotifyAfterSeconds: Double = 10
+        /// A day. Beyond that the number is somebody testing something, and
+        /// anything at all is better than a value that reads as silence by
+        /// accident.
+        public static let notifyRange: ClosedRange<Double> = 0...86_400
+
         public var cursorShape: CursorShape = .block
         public var cursorBlinks = true
         public var scrollbackLines = defaultScrollbackLines
@@ -112,6 +119,15 @@ public struct Configuration: Codable, Equatable, Sendable {
         /// shell already running keeps the environment it was born with.
         public var shellIntegration = false
 
+        /// Announce a command that finished somewhere the person was not
+        /// looking, once it has taken at least this long. `0` never announces.
+        ///
+        /// Ten seconds by default: long enough that an ordinary command is not
+        /// news, short enough that a build worth walking away from is. Knowing it
+        /// at all is what the shell's own marks are for — without them a terminal
+        /// cannot tell a finished command from a slow one.
+        public var notifyAfterSeconds = Behaviour.defaultNotifyAfterSeconds
+
         public init() {}
 
         public init(from decoder: Decoder) throws {
@@ -122,6 +138,8 @@ public struct Configuration: Codable, Equatable, Sendable {
             confirmBeforeClosingRunningSession =
                 container.orDefault(.confirmBeforeClosingRunningSession, true)
             shellIntegration = container.orDefault(.shellIntegration, false)
+            notifyAfterSeconds = container.orDefault(.notifyAfterSeconds,
+                                                     Behaviour.defaultNotifyAfterSeconds)
         }
     }
 
@@ -266,6 +284,15 @@ public struct Configuration: Codable, Equatable, Sendable {
             let clamped = min(max(behaviour.scrollbackLines, scrollback.lowerBound), scrollback.upperBound)
             warnings.append("scrollback of \(behaviour.scrollbackLines) lines is outside \(scrollback.lowerBound)–\(scrollback.upperBound); using \(clamped)")
             behaviour.scrollbackLines = clamped
+        }
+
+        let notify = Behaviour.notifyRange
+        if !behaviour.notifyAfterSeconds.isFinite || !notify.contains(behaviour.notifyAfterSeconds) {
+            let clamped = behaviour.notifyAfterSeconds.isFinite
+                ? min(max(behaviour.notifyAfterSeconds, notify.lowerBound), notify.upperBound)
+                : Behaviour.defaultNotifyAfterSeconds
+            warnings.append("notifyAfterSeconds of \(behaviour.notifyAfterSeconds) is outside \(notify.lowerBound)–\(notify.upperBound); using \(clamped)")
+            behaviour.notifyAfterSeconds = clamped
         }
 
         for name in colours.overrides.keys.sorted() {

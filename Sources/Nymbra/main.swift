@@ -489,6 +489,13 @@ if CommandLine.arguments.contains("--shell-integration-test") {
     exit(runShellIntegrationTest() ? 0 : 1)
 }
 
+// A notification when a long command finishes, asserted against a real zsh: the
+// timing comes from the shell's own marks, so without one there is no duration to
+// measure and nothing to decide.
+if CommandLine.arguments.contains("--notify-test") {
+    exit(runNotifyTest() ? 0 : 1)
+}
+
 /// The marks a shell sent, collected off the delivery queue.
 private final class MarkLog {
     private let lock = NSLock()
@@ -641,6 +648,158 @@ func runShellIntegrationTest() -> Bool {
         FileHandle.standardError.write(Data("nymbra: shell-integration-test \(error)\n".utf8))
         return false
     }
+}
+
+/// A notification when a command that took a while finishes, asserted against a
+/// real zsh.
+///
+/// The *rule* — how long is long, and whether anybody was watching — is tested in
+/// the harness, where it can be argued with. What only a live shell can show is
+/// the wiring: that a shell taught to report itself yields a duration at all, that
+/// the number governing it is the configured threshold rather than one written
+/// down somewhere, and that the tab announced is the one nobody was looking at.
+///
+/// The notification is swapped for a capture. Posting cannot be tested from here:
+/// this is a bare executable, and `UNUserNotificationCenter.current()` aborts
+/// outside an application bundle rather than failing — which is why
+/// `TerminalWindow.deliver` is a seam in the first place.
+func runNotifyTest() -> Bool { // swiftlint:disable:this function_body_length
+    guard access("/bin/zsh", X_OK) == 0 else {
+        print("notify-test\tskipped=true reason=no-zsh")
+        return true
+    }
+
+    // A duration needs the shell's marks, so the integration has to be on, so
+    // files get written. Pointed at a temporary directory so this test cannot
+    // overwrite the real ones, and put back afterwards because the environment
+    // outlives the test.
+    let fileManager = FileManager.default
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("nymbra-notify-\(getpid())")
+    defer { try? fileManager.removeItem(at: root) }
+
+    let previous = ProcessInfo.processInfo.environment["NYMBRA_CONFIG"]
+    setenv("NYMBRA_CONFIG", root.appendingPathComponent("config.json").path, 1)
+    defer {
+        // An empty value is not an absence: only `unsetenv` restores "there was
+        // no such variable".
+        if let previous {
+            setenv("NYMBRA_CONFIG", previous, 1)
+        } else {
+            unsetenv("NYMBRA_CONFIG")
+        }
+    }
+
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+
+    var configuration = Configuration()
+    configuration.behaviour.shellIntegration = true
+    configuration.behaviour.confirmBeforeClosingRunningSession = false
+    // Half a second, so the test does not spend a real ten waiting to find out
+    // that the threshold is honoured.
+    configuration.behaviour.notifyAfterSeconds = 0.5
+    configuration.shell.path = "/bin/zsh"
+
+    let window: TerminalWindow
+    do {
+        window = try TerminalWindow(configuration: configuration)
+    } catch {
+        print("notify-test\tFAIL: no window: \(error)")
+        return false
+    }
+    window.onSpawnFailure = { error in
+        FileHandle.standardError.write(Data("nymbra: notify-test spawn failed: \(error)\n".utf8))
+    }
+
+    /// What the window would have posted.
+    final class Postbox {
+        private(set) var lines: [String] = []
+        private(set) var tabs: [TabID] = []
+        func note(_ announcement: CommandAttention.Announcement, for tab: TabID) {
+            lines.append("\(announcement.title): \(announcement.body)")
+            tabs.append(tab)
+        }
+    }
+    let postbox = Postbox()
+    window.deliver = { announcement, tab in postbox.note(announcement, for: tab) }
+
+    func pump(_ seconds: Double) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    }
+
+    /// Wait for something that is supposed to happen, so a slow runner costs
+    /// time rather than a failure — but not forever.
+    func pump(until arrived: () -> Bool, within timeout: Double) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !arrived() && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+    }
+
+    let strip = window.tabView
+    guard window.newTab() else {
+        print("notify-test\tFAIL: a second tab would not open")
+        return false
+    }
+    let tabs = strip.tabViewItems.compactMap { $0.identifier as? TabID }
+    let front = window.focusedTab
+    guard tabs.count == 2, let background = tabs.first(where: { $0 != front }),
+          let terminal = window.panes(in: background).values.first?.terminal else {
+        print("notify-test\tFAIL: no tab left in the background (tabs=\(tabs.count))")
+        return false
+    }
+
+    // 1. A command that took a while, in a tab nobody is watching. This is the
+    //    milestone's acceptance criterion, minus the part that needs a bundle.
+    terminal.send("sleep 1.2\n")
+    pump(until: { postbox.lines.count == 1 }, within: 20)
+    let announced = postbox.lines.count == 1
+    let measured = postbox.lines.first?.contains("Finished in 1.") == true
+    let namedTheTab = postbox.tabs.first == background
+
+    // 2. It went badly. The exit status is the reason somebody would want to
+    //    know, so it leads — and a terminal that reported every finished command
+    //    as a success would pass everything above this.
+    terminal.send("sleep 1.2 && false\n")
+    pump(until: { postbox.lines.count == 2 }, within: 20)
+    let failed = postbox.lines.count == 2
+    let failedSaidSo = postbox.lines.last?.contains("Exited 1 after 1.") == true
+
+    // 3. Under the threshold: not news. The rule is tested in the harness, and
+    //    this is the wiring question — that the shell's own marks are what feed
+    //    it, rather than the threshold being applied to something else.
+    let beforeShort = postbox.lines.count
+    terminal.send("sleep 0.1\n")
+    pump(1.5)
+    let quiet = postbox.lines.count == beforeShort
+
+    // 4. Turned off, which is a threshold of zero and not a separate switch.
+    var silenced = configuration
+    silenced.behaviour.notifyAfterSeconds = 0
+    window.apply(silenced)
+    let beforeSilence = postbox.lines.count
+    terminal.send("sleep 1.2\n")
+    pump(2.5)
+    let silencedQuiet = postbox.lines.count == beforeSilence
+
+    print("notify-test\tannounced=\(announced ? 1 : 0) "
+        + "measured=\(measured ? 1 : 0) "
+        + "tab=\(namedTheTab ? 1 : 0) "
+        + "failed=\(failed && failedSaidSo ? 1 : 0) "
+        + "quiet=\(quiet ? 1 : 0) "
+        + "off=\(silencedQuiet ? 1 : 0)")
+    if !announced {
+        print("notify-test\tsaw=\(postbox.lines)")
+    }
+
+    // Terminated explicitly rather than left to the process exiting, so a failure
+    // does not leave shells behind on a runner.
+    for tab in tabs {
+        for pane in window.panes(in: tab).values { pane.terminal.terminate() }
+    }
+    return announced && measured && namedTheTab && failed && failedSaidSo && quiet && silencedQuiet
 }
 
 /// What the terminal actually saw, for the failure that needs it.
