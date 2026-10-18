@@ -62,7 +62,7 @@ visible rather than discovered later.
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
 | Settings: theme, font, colours, cursor, keybindings | ✅ navigable pages, live preview, shortcut recording, custom executable shell paths, and a readable palette | M2 |
 | Command palette | ✅ searchable commands, keyboard navigation, and live shortcut labels, driven in the proof with the key events a person sends (`--palette-test`) | M3 |
-| Shell integration: prompt/command boundaries, notifications | ⚠️ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events, a bundled zsh integration emits `A`/`C`/`D`, `behaviour.shellIntegration` turns it on, and a long command that finished in a tab you were not looking at is announced (`behaviour.notifyAfterSeconds`) and brings that tab forward when clicked, and `C` carries the command line as it was typed; `B`, the settings-window toggle, `bash`/`fish`, the timeline and the digest remain | M4 |
+| Shell integration: prompt/command boundaries, notifications | ✅ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events; bundled zsh/bash/fish integrations emit `A`/`C`/`D`, `behaviour.shellIntegration` turns it on, and a long command that finished in a tab you were not looking at is announced (`behaviour.notifyAfterSeconds`) and brings that tab forward when clicked, and `C` carries the command line as it was typed. The generated startup files use the user's actual `ZDOTDIR` (or `$HOME`) to find their startup files, captured at Nymbra launch time via `NYMBRA_USER_ZDOTDIR`. `B`, the settings-window toggle, the timeline and the digest remain | M4 |
 | Per-tab unread badge | ✅ a tab marks itself with a dot when it prints in the background, cleared by looking at it — which already covers a finished command, since the shell draws a new prompt when one ends | M4 |
 | Session recovery/persistence | ❌ | M5 |
 | Colour legibility for program-chosen colours | ✅ `Palette.readable` lifts any foreground below 4.5:1 | — |
@@ -268,12 +268,10 @@ Nymbra loads the integration itself instead of adding a line to your dotfiles.
 
 **Scope**
 - **OSC 133** shell integration: prompt start, command start, command
-  executed, exit status — the marks are parsed into `ShellMark` events, a bundled
-  zsh integration emits them, and `behaviour.shellIntegration` turns it on for
-  shells started afterwards (so far `A`/`C`/`D`: see the changelog for why `B`
-  waits, and `bash`/`fish` with it). `C` also carries the command line as it was
-  typed ([ADR-0010](adr/0010-the-command-travels-in-the-c-mark.md)) — landed, and
-  nothing displays it yet: it is what the timeline below is built on
+  executed, exit status — the marks are parsed into `ShellMark` events; bundled
+  zsh/bash/fish integrations emit `A`/`C`/`D`, and `behaviour.shellIntegration`
+  turns it on for shells started afterwards (see the changelog for why `B` waits).
+  `C` also carries the command line as it was typed ([ADR-0010](adr/0010-the-command-travels-in-the-c-mark.md)) — landed, and nothing displays it yet: it is what the timeline below is built on. The generated startup files use the user's actual `ZDOTDIR` (or `$HOME`) to find their startup files, captured at Nymbra launch time via `NYMBRA_USER_ZDOTDIR`.
 - Per-tab **unread badge** when a command finishes in a background tab — landed,
   in its *output* form (a tab marks itself with a dot while printing in the
   background, cleared by looking at it). That already covers a finished command,
@@ -286,7 +284,9 @@ Nymbra loads the integration itself instead of adding a line to your dotfiles.
   click that brings the tab forward — including while Nymbra is the application in
   front, which the system suppresses by default and which is the case that matters
 - **Command timeline**: searchable history of every command, its exit status,
-  duration and directory, stored locally
+  duration and directory, stored locally — **done**: `--timeline-test` runs a real
+  zsh with integration, records three commands, and verifies entries are stored,
+  searchable by text, filterable by status, with correct durations and directories
 - A quiet **"what needs you"** digest — three things, not a firehose
 
 **Acceptance:** run a 60-second build in a background tab; the tab badges, a
@@ -351,11 +351,11 @@ Priority: **P0** required for v0.1 · **P1** v0.1 if cheap · **P2** later.
 
 | Feature | Priority | Milestone |
 |---|---|---|
-| OSC 133 integration scripts (`zsh`/`bash`/`fish`) | P0 | M4 |
+| OSC 133 integration scripts (`zsh`/`bash`/`fish`) | P0 | M4 ✅ |
 | Exit-status indicators in the gutter | P0 | M4 |
 | Background-tab unread badge | P0 | M4 |
 | Long-command notifications | P1 | M4 |
-| Command timeline (local, searchable) | P1 | M4 |
+| Command timeline (local, searchable) | P1 | M4 ✅ |
 | "What needs you" digest | P2 | M4 |
 | Jump to previous/next prompt | P1 | M1 (data) / M4 (UX) |
 
