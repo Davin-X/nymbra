@@ -252,6 +252,9 @@ See [ADR-0004](adr/0004-coretext-first-metal-later.md).
 
 Where Nymbra becomes something other terminals are not.
 
+See [ADR-0009](adr/0009-shell-integration-without-touching-dotfiles.md) for why
+Nymbra loads the integration itself instead of adding a line to your dotfiles.
+
 **Scope**
 - **OSC 133** shell integration: prompt start, command start, command
   executed, exit status — the marks are parsed into `ShellMark` events, a bundled
