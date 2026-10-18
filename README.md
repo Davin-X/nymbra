@@ -26,8 +26,8 @@ $ otool -L .build/release/Nymbra
 > another with its own shell, and closing one is not a dead end.
 >
 > It is not yet a daily driver. Missing: search, mouse reporting
-> (the modes are tracked, but no bytes are sent yet), text reflow on resize, and
-> the Metal renderer that will replace CoreText drawing.
+> (the modes are tracked, but no bytes are sent yet), and the Metal renderer
+> that will replace CoreText drawing.
 >
 > See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned and
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it is built.
