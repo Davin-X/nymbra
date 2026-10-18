@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — clicking the announcement brings the tab forward
+
+The notification from the entry below says which tab it is about, and clicking it
+brings that tab to the front. A notification about a build is only half a feature
+if it leaves you to work out which tab it was in.
+
+- **It now appears at all while Nymbra is in front**, which it did not before.
+  The system suppresses a notification from whichever application is active, and
+  that is precisely the case this exists for: Nymbra in front, the finished
+  command in a tab *behind* the one on screen. A notification the settings promise
+  and nobody ever sees is worse than no notification, because the settings then
+  look like they lie.
+- The notification carries the tab's integer id, not a `TabID`: it is a message to
+  the future, and it has already been through another process by the time anybody
+  clicks it. Reviving it is one cast, and a value that is not an integer means
+  "nothing to do" rather than a wrong tab.
+- **A tab that is gone is not an error.** A command can finish, the tab be closed,
+  and the click arrive afterwards, so the click does nothing and says nothing —
+  an alert about a notification somebody already saw is worse than the silence.
+- The object that receives a click is owned by `AppController`, because the
+  notification centre holds its delegate *weakly*: one nobody owns is released
+  before the click that arrives a minute later.
+- `--notify-test` asserts both ends of the click path. It builds the notification
+  the window would build — from the announcement a real command really produced —
+  hands it back the way the daemon would, and checks the right tab came forward,
+  that a nonsense payload focuses nothing, and that a tab that no longer exists
+  focuses nothing either. Delete the payload and it fails; remove the guard that
+  keeps the application away from the notification centre without a bundle and it
+  **aborts**, which is the whole reason the guard is there.
+- Still not here: notifications are posted silently.
+
 ### Added — a notification when a long command finishes
 
 `behaviour.notifyAfterSeconds` (`docs/CONFIG.md`) is how long a command has to run
@@ -45,9 +76,8 @@ bytes, and only the shell knows which is which.
   and asserts what was announced — then that a short command and a threshold of
   `0` both stay quiet. It catches the wiring, which nothing else can: cutting the
   mark handler makes it fail loudly.
-- Clicking the notification does not yet focus the tab, and notifications are
-  posted silently. A terminal that beeps at a finished build is one people turn
-  off.
+- Notifications are posted silently. A terminal that beeps at a finished build is
+  one people turn off.
 
 ### Added — a setting for the shell integration, off until asked for
 

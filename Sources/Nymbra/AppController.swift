@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import NymbraCore
 import NymbraInput
+import UserNotifications
 
 /// The application's spine: the windows, the settings, and the commands that
 /// both the menu bar and the settings window are built from.
@@ -16,15 +17,60 @@ final class AppController: NSObject {
     private var settingsController: SettingsWindowController?
     private var pendingSave: DispatchWorkItem?
 
+    /// What the notification system talks to when a finished command has been
+    /// announced and somebody clicks it.
+    ///
+    /// Owned here because the notification centre holds its delegate *weakly*: a
+    /// router nothing else refers to is released as soon as this line returns, and
+    /// the click that arrives a minute later has nowhere to go.
+    private lazy var notifications = NotificationRouter()
+
     init(configuration: Configuration) {
         self.configuration = configuration
         super.init()
     }
 
     /// Install the menu bar and put the first window up.
-    func start() {
+    ///
+    /// Returns the window, because the caller that has just installed a menu bar
+    /// has nothing else to reach for, and a test wants to click about in it.
+    @discardableResult
+    func start() -> TerminalWindow? {
         AppMenu.install(controller: self, configuration: configuration)
-        _ = makeWindow()
+        installNotifications()
+        return makeWindow()
+    }
+
+    /// Listen for clicks on the notifications a finished command posts.
+    private func installNotifications() {
+        // Outside an application bundle the call below **aborts** rather than
+        // failing, and a run from `swift run` is outside one; see
+        // `TerminalWindow.post`. Reaching the next line is therefore the assertion
+        // that this guard is still doing its job.
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        notifications.focus = { [weak self] tab in self?.focus(tab: tab) ?? false }
+        UNUserNotificationCenter.current().delegate = notifications
+    }
+
+    /// Bring the tab a notification is about to the front.
+    ///
+    /// Returns whether it was still there. A notification outlives the thing it is
+    /// about — a build finishes, the tab gets closed, and the click arrives after
+    /// — so "that tab is gone" is an ordinary answer, and not something to tell
+    /// the person about with an alert about a notification they already saw.
+    ///
+    /// The whole tab comes forward rather than the one pane inside it that ran the
+    /// command: a tab that is on screen is a tab whose panes are all visible, and
+    /// the tab is what the notification named.
+    @discardableResult
+    func focus(tab id: TabID) -> Bool {
+        discardClosedWindows()
+        for window in windows where window.focus(tab: id) {
+            window.makeKeyAndOrderFront()
+            NSApp.activate(ignoringOtherApps: true)
+            return true
+        }
+        return false
     }
 
     /// Make a window, with a shell of its own.

@@ -181,7 +181,7 @@ jobs:
           wait "$pid" 2>/dev/null || true
           cat notify.err >&2 || true
           cat notify.out
-          grep -q "announced=1 measured=1 tab=1 failed=1 quiet=1 off=1" notify.out \
+          grep -q "announced=1 measured=1 tab=1 failed=1 quiet=1 off=1 click=1 ignored=1" notify.out \
             || { echo "::error::a long command was not announced as it should be"; exit 1; }
           echo "Notification passed"
 
