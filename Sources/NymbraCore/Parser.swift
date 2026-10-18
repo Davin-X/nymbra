@@ -49,6 +49,8 @@ public final class Parser {
     public var onResponse: (([UInt8]) -> Void)?
     /// A `BEL` was received.
     public var onBell: (() -> Void)?
+    /// A shell-integration mark was received (`OSC 133`). See `ShellMark`.
+    public var onShellMark: ((ShellMark) -> Void)?
 
     private var intermediates: [UInt8] = []
     private var privateMarkers: [UInt8] = []
@@ -420,14 +422,33 @@ public final class Parser {
             collectClear()
             state = .ground
         }
-        // Everything is `Ps ; Pt`. We act on the title and deliberately ignore
-        // the rest: no clipboard writes (OSC 52), no colour changes (OSC 4/10),
-        // no hyperlinks yet (OSC 8), no shell marks yet (OSC 133, M4).
+        // Everything is `Ps ; Pt`. We act on the title and on the shell marks and
+        // deliberately ignore the rest: no clipboard writes (OSC 52), no colour
+        // changes (OSC 4/10), no hyperlinks yet (OSC 8).
         guard let separator = stringBuffer.firstIndex(of: 0x3B) else { return }
         let command = String(decoding: stringBuffer[..<separator], as: UTF8.self)
         let payload = String(decoding: stringBuffer[stringBuffer.index(after: separator)...], as: UTF8.self)
         switch command {
         case "0", "2": screen.title = payload
+        case "133": shellMark(payload)
+        default: break
+        }
+    }
+
+    /// `OSC 133 ; <mark>` — the shell reporting its own progress, which is the
+    /// only way the terminal can tell a prompt from a command's output. A mark
+    /// this does not recognise is dropped rather than guessed at, and none of
+    /// them is ever written to the screen.
+    private func shellMark(_ payload: String) {
+        // The mark is the payload up to the first `;`; only `D` carries more.
+        switch payload.prefix(while: { $0 != ";" }) {
+        case "A": onShellMark?(.promptStart)
+        case "B": onShellMark?(.commandStart)
+        case "C": onShellMark?(.commandExecuted)
+        case "D":
+            // `D` alone is "finished, status not reported"; `D;0` is success.
+            let status = payload.split(separator: ";", omittingEmptySubsequences: false).dropFirst().first
+            onShellMark?(.commandFinished(status.flatMap { Int32($0) }))
         default: break
         }
     }

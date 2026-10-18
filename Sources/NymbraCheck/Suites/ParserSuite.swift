@@ -5,12 +5,14 @@ private final class Recorder {
     lazy var parser = Parser(screen: screen)
     var responses: [String] = []
     var bells = 0
+    var marks: [ShellMark] = []
 
     init() {
         parser.onResponse = { [weak self] bytes in
             self?.responses.append(String(decoding: bytes, as: UTF8.self))
         }
         parser.onBell = { [weak self] in self?.bells += 1 }
+        parser.onShellMark = { [weak self] in self?.marks.append($0) }
     }
 
     func feed(_ text: String) { parser.feed(text) }
@@ -78,6 +80,43 @@ func parserSuite(_ h: Harness) {
         let t = Recorder()
         t.feed("\u{1B}]0;unterminated")
         h.equal(t.row(0), "", "an unterminated OSC consumes the rest of the input")
+    }
+
+    // MARK: OSC 133 (shell marks)
+
+    do {
+        let t = Recorder()
+        t.feed("\u{1B}]133;A\u{07}$ \u{1B}]133;B\u{07}ls\u{1B}]133;C\u{07}file\u{1B}]133;D;0\u{07}")
+        h.equal(t.marks, [.promptStart, .commandStart, .commandExecuted, .commandFinished(0)],
+                "a whole command's marks arrive in order, with its exit status")
+        h.equal(t.row(0), "$ lsfile", "no shell mark reaches the screen")
+    }
+
+    do {
+        let t = Recorder()
+        t.feed("\u{1B}]133;D\u{07}")
+        h.equal(t.marks, [.commandFinished(nil)],
+                "a finish with no status is not assumed to have succeeded")
+        t.feed("\u{1B}]133;D;130\u{1B}\\")
+        h.equal(t.marks.last, .commandFinished(130), "the status survives an ST-terminated mark")
+        t.feed("\u{1B}]133;D;\u{07}")
+        h.equal(t.marks.last, .commandFinished(nil), "an empty status is no status")
+        t.feed("\u{1B}]133;D;not-a-number\u{07}")
+        h.equal(t.marks.last, .commandFinished(nil), "a status that is not a number is not invented")
+    }
+
+    do {
+        let t = Recorder()
+        t.feed("\u{1B}]133;Z\u{07}x")
+        h.equal(t.marks, [], "an unrecognised shell mark is dropped, not guessed at")
+        h.equal(t.row(0), "x", "an unrecognised shell mark is not drawn")
+    }
+
+    do {
+        let t = Recorder()
+        t.feed("\u{1B}]1337;A\u{07}x")
+        h.equal(t.marks, [], "a code that merely starts with 133 is not OSC 133")
+        h.equal(t.row(0), "x", "an unrelated OSC code still does not draw itself")
     }
 
     // MARK: CSI
