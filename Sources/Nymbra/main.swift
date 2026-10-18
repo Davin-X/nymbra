@@ -483,6 +483,171 @@ if CommandLine.arguments.contains("--mouse-test") {
     exit(runMouseTest() ? 0 : 1)
 }
 
+// Shell integration, asserted against a real zsh: that the marks a terminal
+// needs actually arrive, and that the user's own startup file still runs.
+if CommandLine.arguments.contains("--shell-integration-test") {
+    exit(runShellIntegrationTest() ? 0 : 1)
+}
+
+/// The marks a shell sent, collected off the delivery queue.
+private final class MarkLog {
+    private let lock = NSLock()
+    private var marks: [ShellMark] = []
+
+    func append(_ mark: ShellMark) {
+        lock.lock()
+        defer { lock.unlock() }
+        marks.append(mark)
+    }
+
+    var all: [ShellMark] {
+        lock.lock()
+        defer { lock.unlock() }
+        return marks
+    }
+}
+
+/// Shell integration, asserted against a real zsh.
+///
+/// This is deliberately not a test against a pile of expected bytes. zsh is what
+/// decides when its own hooks run, so the only honest questions are whether a
+/// real zsh, started the way Nymbra starts one, reports what it is doing — and
+/// whether the user's own startup file still ran, because that is the way this
+/// feature can ruin somebody's shell rather than merely fail to help.
+///
+/// The stand-in for the user's config is a temporary directory, so the real one
+/// is not involved and nothing here depends on how this machine is set up.
+func runShellIntegrationTest() -> Bool {
+    guard access("/bin/zsh", X_OK) == 0 else {
+        // Said out loud rather than passed silently: "there was no zsh to test"
+        // and "the integration works" must not look the same in a log.
+        print("shell-integration-test\tskipped=true reason=no-zsh")
+        return true
+    }
+
+    let fileManager = FileManager.default
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("nymbra-integration-\(getpid())")
+    let userZDOTDIR = root.appendingPathComponent("user")
+    let generated = root.appendingPathComponent("generated")
+    defer { try? fileManager.removeItem(at: root) }
+
+    do {
+        try fileManager.createDirectory(at: userZDOTDIR, withIntermediateDirectories: true)
+        // Standing in for the user's own config. If the generated files ever
+        // stop loading it, this variable stops arriving — which is exactly the
+        // regression this test exists to catch.
+        //
+        // Only a `.zshrc`, deliberately: the user therefore has no `.zshenv`,
+        // `.zprofile` or `.zlogin`, so the generated stand-ins for those are all
+        // exercised down the "the user has no such file" path on the way.
+        try "export NYMBRA_TEST_RC=loaded\nPS1='nymbra-test%# '\n".write(
+            to: userZDOTDIR.appendingPathComponent(".zshrc"),
+            atomically: true, encoding: .utf8)
+
+        let integration = try ShellIntegration.zsh(in: generated, userZDOTDIR: userZDOTDIR.path)
+
+        let queue = DispatchQueue(label: "dev.nymbra.shell-integration-test")
+        let terminal = try Terminal(size: GridSize(rows: 24, cols: 80),
+                                    shell: "/bin/zsh",
+                                    deliveryQueue: queue,
+                                    integration: integration)
+
+        let log = MarkLog()
+        let promptUp = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        let failed = DispatchSemaphore(value: 0)
+        terminal.onShellMark = { mark in
+            log.append(mark)
+            switch mark {
+            case .promptStart: promptUp.signal()
+            case let .commandFinished(status):
+                // A status of 0 for everything would pass a test that only ever
+                // asked for "a finished command", which is precisely the bug
+                // worth catching: a terminal that reports success regardless.
+                if status == 0 { finished.signal() } else if status == 7 { failed.signal() }
+            case .commandStart, .commandExecuted: break
+            }
+        }
+        terminal.start()
+
+        guard promptUp.wait(timeout: .now() + 20) == .success else {
+            reportShellIntegration(terminal, queue: queue, log: log,
+                                   reason: "zsh printed no prompt in 20s")
+            terminal.terminate()
+            waitpid(terminal.pid, nil, 0)
+            return false
+        }
+
+        // `printf` with the value expanded, rather than `echo "$VAR"`: the pty
+        // echoes what is typed back at us, so a marker that also appeared in the
+        // command line would be satisfied by the echo alone.
+        terminal.send("printf 'nymbra-ran=%s\\n' \"$NYMBRA_TEST_RC\"\n")
+        guard finished.wait(timeout: .now() + 20) == .success else {
+            reportShellIntegration(terminal, queue: queue, log: log,
+                                   reason: "zsh reported no finished command")
+            terminal.terminate()
+            waitpid(terminal.pid, nil, 0)
+            return false
+        }
+
+        // A command that fails, so the status is shown to be the command's and
+        // not a constant. `(exit 7)` rather than `false`, because 7 is a number
+        // nothing else in this test produces.
+        terminal.send("(exit 7)\n")
+        guard failed.wait(timeout: .now() + 20) == .success else {
+            reportShellIntegration(terminal, queue: queue, log: log,
+                                   reason: "zsh did not report a failing command as 7")
+            terminal.terminate()
+            waitpid(terminal.pid, nil, 0)
+            return false
+        }
+
+        // Read the screen back on the queue that parses it, so this cannot race
+        // the reader: the mark that said "finished" came through that same queue,
+        // and everything the command printed came before it.
+        let text = queue.sync {
+            (0..<terminal.screen.rows).map { terminal.screen.rowText($0) }.joined(separator: "\n")
+        }
+
+        terminal.terminate()
+        waitpid(terminal.pid, nil, 0)
+
+        let marks = log.all
+        let prompted = marks.contains(.promptStart)
+        let executed = marks.contains(.commandExecuted)
+        let status = marks.contains(.commandFinished(0))
+        let failure = marks.contains(.commandFinished(7))
+        let userConfig = text.contains("nymbra-ran=loaded")
+
+        print("shell-integration-test\tmarks=\(marks.count)"
+              + " prompt=\(prompted ? 1 : 0)"
+              + " executed=\(executed ? 1 : 0)"
+              + " finished=\(status ? 1 : 0)"
+              + " failed=\(failure ? 1 : 0)"
+              + " userConfig=\(userConfig ? 1 : 0)")
+        return prompted && executed && status && failure && userConfig
+    } catch {
+        FileHandle.standardError.write(Data("nymbra: shell-integration-test \(error)\n".utf8))
+        return false
+    }
+}
+
+/// What the terminal actually saw, for the failure that needs it.
+///
+/// "no prompt in 20 seconds" does not say whether zsh never started, started and
+/// fell over a generated startup file, or ran perfectly and simply did not
+/// report. The screen is the difference between those, and without it the
+/// failure reads as "the terminal is broken".
+private func reportShellIntegration(_ terminal: Terminal, queue: DispatchQueue,
+                                    log: MarkLog, reason: String) {
+    let screen = queue.sync {
+        (0..<terminal.screen.rows).map { terminal.screen.rowText($0) }.joined(separator: "\n")
+    }
+    FileHandle.standardError.write(
+        Data("nymbra: \(reason)\n--- screen ---\n\(screen)\n--- marks: \(log.all) ---\n".utf8))
+}
+
 /// Tabs, the way they are actually used: a strip that is there to be seen and
 /// clicked, a `+` that makes a tab, and a shell in each that no other tab can
 /// disturb.

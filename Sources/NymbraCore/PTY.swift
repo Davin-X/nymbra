@@ -88,11 +88,19 @@ public func defaultWorkingDirectory() -> String {
 /// The shell never started; all anyone saw was the line discipline echoing back
 /// what had been typed, which reads exactly like a broken emulator.
 public func spawnShell(rows: Int, cols: Int, shell explicitShell: String? = nil,
-                       workingDirectory: String? = nil) throws -> PTY {
+                       workingDirectory: String? = nil,
+                       integration: ShellIntegration? = nil) throws -> PTY {
     let shellPath = resolveShell(explicitShell)
+    // Only a shell that knows how to be set up is set up. Asking for integration
+    // while running, say, bash is not an error: it is a no-op, because the
+    // alternative is a shell that starts subtly differently for no benefit.
+    let environment = integration.flatMap {
+        ShellIntegration.supports(shell: shellPath) ? $0.environment : nil
+    } ?? [:]
     // argv[0] is the bare name, as a login shell expects.
     return try spawn(program: shellPath, arguments: [basename(of: shellPath), "-l"],
-                     rows: rows, cols: cols, workingDirectory: workingDirectory)
+                     rows: rows, cols: cols, workingDirectory: workingDirectory,
+                     environment: environment)
 }
 
 /// Run any program on a new PTY, with that terminal as its controlling terminal.
@@ -102,14 +110,15 @@ public func spawnShell(rows: Int, cols: Int, shell explicitShell: String? = nil,
 /// nothing with its terminal still has one" are different claims, and the second
 /// is the one that catches a spawn that only *looks* right (ADR-0008).
 public func spawn(program: String, arguments: [String], rows: Int, cols: Int,
-                  workingDirectory: String? = nil) throws -> PTY {
+                  workingDirectory: String? = nil,
+                  environment extra: [String: String] = [:]) throws -> PTY {
     let helper = try spawnHelperPath()
     let directory = workingDirectory ?? defaultWorkingDirectory()
 
     // The environment is built here rather than inherited blindly: TERM is what
     // makes full-screen programs emit the right escape sequences.
     let argv = CStringVector(arguments)
-    let envp = CStringVector(childEnvironment(directory: directory))
+    let envp = CStringVector(childEnvironment(directory: directory, extra: extra))
     defer {
         argv.deallocate()
         envp.deallocate()
@@ -174,7 +183,7 @@ private func basename(of path: String) -> String {
 /// The environment the shell starts with. A terminal has to declare what it is
 /// before a program can ask: `TERM` is what makes full-screen programs emit the
 /// right escape sequences, and true-colour programs check `COLORTERM`.
-private func childEnvironment(directory: String) -> [String] {
+private func childEnvironment(directory: String, extra: [String: String]) -> [String] {
     var environment = ProcessInfo.processInfo.environment
     environment["TERM"] = "xterm-256color"
     environment["COLORTERM"] = "truecolor"
@@ -183,6 +192,9 @@ private func childEnvironment(directory: String) -> [String] {
     // `cd -` and for their prompt, and an inherited value naming a different
     // directory is a lie the child cannot detect.
     environment["PWD"] = directory
+    // Last, so that the terminal's own decision about this child wins over
+    // whatever the parent happened to be carrying.
+    for (key, value) in extra { environment[key] = value }
     return environment.map { "\($0.key)=\($0.value)" }
 }
 

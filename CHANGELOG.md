@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a zsh integration that says what the shell is doing
+
+The marks in the entry below only exist if something tells the shell to send
+them, so Nymbra now carries a zsh integration and loads it itself. It starts zsh
+with `$ZDOTDIR` pointing at a small generated directory whose startup files load
+your own first and then Nymbra's. **Your files are never edited**, and the
+variable is set only in the environment of a shell Nymbra started — no other
+terminal, and no `zsh` you run by hand, is touched by it.
+
+- The generated files are the ones zsh asks for by name, so your `.zshenv`,
+  `.zprofile`, `.zshrc`, `.zlogin` and `.zlogout` all still run, in that order.
+  `make shell-integration-test` starts a real zsh behind a stand-in for that
+  config and checks both halves — that the marks arrive, *and* that the stand-in
+  still ran: `marks=7 prompt=1 executed=1 finished=1 failed=1 userConfig=1`.
+- A command that fails is reported as failing. The test runs `(exit 7)` and
+  requires a status of 7, because a terminal that reports success for everything
+  would pass any weaker check — which is exactly the bug worth catching.
+- One thing this was expected to break and does not: a generated startup file
+  ends with a non-zero status when the user has no file of that name, and it was
+  tempting to "fix" that with an `if`. Measured instead — under `err_return` and
+  under `set -e` set from the user's own `.zshenv` — zsh does not look at the
+  status of a startup file, and the integration loads either way. The simpler
+  `&&` stayed, with a comment saying so, because the next person will have the
+  same idea. (For the record, `set -e` does change what the *test* may assert: a
+  failing command now exits the shell, so it never reports an exit status at
+  all. That is the shell being right.)
+- The prompt is not touched. A `B` mark, which says where the command line
+  begins, is deliberately not sent yet: the only way to know when zsh has
+  finished drawing its prompt is to define its `zle-line-init` widget, and that
+  is the line editor itself, the one part of a shell where being second in line
+  is worse than not being there. Nothing built so far needs `B`.
+- Not wired to a setting yet. This lands the mechanism and the proof of it; the
+  opt-in toggle is the change after this one.
+
 ### Added — the shell can now say what it is doing
 
 The parser understands `OSC 133`, the sequence a shell writes to report its own
