@@ -56,11 +56,12 @@ visible rather than discovered later.
 |---|---|---|
 | Copy/paste | ✅ selection (click, word, line, drag), Cmd+C and Cmd+V with bracketed paste | — |
 | Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen | — |
-| Search in scrollback | ✅ find overlay, next/previous, matches highlighted in history and the live screen | — |
-| Tabs and split panes | ✅ | M1.x (P0) |
+| Search in scrollback | ✅ toolbar search field, next/previous, matches highlighted in history and the live screen | — |
+| Tabs and split panes | ✅ tabs can be reordered; right-click offers tab actions | M1.x (P0) |
 | Text reflow on resize | ✅ live screen and history rewrap on resize; soft-wrapped rows are rejoined and rewrapped | — |
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
-| Settings: theme, font, colours, cursor, keybindings | ✅ one JSON file, a settings window with live preview, and a readable palette | M2 |
+| Settings: theme, font, colours, cursor, keybindings | ✅ navigable pages, live preview, shortcut recording, custom executable shell paths, and a readable palette | M2 |
+| Command palette | ✅ searchable commands, keyboard navigation, and live shortcut labels | M3 |
 | Shell integration: prompt/command boundaries, notifications | ⚠️ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events, a bundled zsh integration emits `A`/`C`/`D`, `behaviour.shellIntegration` turns it on, and a long command that finished in a tab you were not looking at is announced (`behaviour.notifyAfterSeconds`) and brings that tab forward when clicked, and `C` carries the command line as it was typed; `B`, the settings-window toggle, `bash`/`fish`, the timeline and the digest remain | M4 |
 | Per-tab unread badge | ✅ a tab marks itself with a dot when it prints in the background, cleared by looking at it — which already covers a finished command, since the shell draws a new prompt when one ends | M4 |
 | Session recovery/persistence | ❌ | M5 |
@@ -172,8 +173,8 @@ twice.
   [ADR-0006](adr/0006-configuration-as-a-validated-json-file.md).
 - Plain JSON at `~/Library/Application Support/Nymbra/config.json`, overridable
   with `$NYMBRA_CONFIG` so tests and CI never touch a real user's settings.
-- A settings window (`SettingsWindow.swift`) with tabs for Appearance, Colours,
-  Behaviour, Keyboard and Shell, and a **live preview** that draws with the same
+- A settings window (`SettingsWindow.swift`) with ordered pages for Appearance,
+  Keyboard, Shell, Behaviour and Advanced; the live preview draws with the same
   `Theme` and palette the terminal does. Changes apply to the open terminal as
   they are made; saving is debounced.
 - `Palette` in the UI-free core: eight presets, per-colour overrides, WCAG
@@ -190,11 +191,11 @@ twice.
 
 | Setting | Detail |
 |---|---|
-| Appearance | Preset, font family and size, with a live preview |
-| Colours | Presets — dark (Dark, Ember, Fern, Violet), light (Light, Paper, Dawn), High contrast — plus per-colour overrides |
+| Appearance | Live preview, font family and size, and eight theme presets |
+| Keyboard | Searchable shortcuts, recorded key combinations, and default restoration |
+| Shell | Built-in and `/etc/shells` choices, plus a validated custom executable path |
 | Behaviour | Cursor style and blink, scrollback size, confirm before closing a session that is still running |
-| Keyboard | The default shortcuts, shown in full, and every one of them remappable |
-| Shell | The default shell, read from `/etc/shells`, defaulting to `$SHELL` |
+| Advanced | Per-colour overrides, contrast feedback, and configuration file access |
 | Reset | Restore the original settings, as a diff rather than a silent wipe |
 
 **Fixed in this milestone: legibility.** The first palette was the traditional
@@ -207,9 +208,8 @@ protects `LS_COLORS`, `git` and true-colour output. `SGR 8` (conceal) and `SGR 2
 (faint) opt out, because hiding and dimming are what those codes are *for*.
 
 **Owed — tracked here rather than quietly dropped**
-- The **command palette** row in the feature catalogue. Not in this milestone.
-- Accessibility: VoiceOver labels and full keyboard traversal of the settings
-  window are not written yet.
+- Accessibility: complete VoiceOver labels and full keyboard traversal of the
+  settings window are not written yet.
 - The settings window has been verified headlessly and by hand on one machine; it
   has no snapshot tests.
 
@@ -366,9 +366,9 @@ Priority: **P0** required for v0.1 · **P1** v0.1 if cheap · **P2** later.
 | Config file | P1 | ✅ M2 |
 | Reset to defaults | P1 | ✅ M2 |
 | Legible colours for program-chosen output | P0 | ✅ M2 |
-| Command palette | P1 | M3 |
+| Command palette | P1 | ✅ M3 |
 | Full screen | P2 | ✅ M2 |
-| Search in scrollback | P1 | M3 |
+| Search in scrollback | P1 | ✅ M3 |
 | Text selection and copy | P0 | ✅ M2 |
 | Multiple windows | P2 | M5 |
 | VoiceOver / accessibility | P1 | M2 |

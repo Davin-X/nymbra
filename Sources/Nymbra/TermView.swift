@@ -826,6 +826,15 @@ final class TermView: NSView {
         needsDisplay = true
     }
 
+    func updateFind(query: String) {
+        startFind(query: query)
+    }
+
+    func endFind() {
+        findState = nil
+        needsDisplay = true
+    }
+
     func findNext() {
         guard var state = findState, !state.matches.isEmpty else { return }
         state.currentIndex = (state.currentIndex + 1) % state.matches.count
@@ -843,6 +852,12 @@ final class TermView: NSView {
     private func findAll() {
         var state = findState!
         let query = state.query.lowercased()
+        guard !query.isEmpty else {
+            state.matches = []
+            state.currentIndex = -1
+            findState = state
+            return
+        }
         var matches: [(row: Int, col: Int, len: Int)] = []
 
         // Search in scrollback
@@ -879,7 +894,6 @@ final class TermView: NSView {
     }
 
     private func scrollToMatch(_ match: (row: Int, col: Int, len: Int)) {
-        let totalLines = screen.scrollback.count + screen.rows
         let targetRow = match.row
         // Scroll so the match is in the middle of the viewport if possible.
         let offset = max(0, targetRow - screen.rows / 2)

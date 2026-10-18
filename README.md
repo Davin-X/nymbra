@@ -21,11 +21,12 @@ $ otool -L .build/release/Nymbra
 > and emulates cursor movement, colour, erasing, line and character editing,
 > scroll regions, the alternate screen, wrapping and resize. Full-screen
 > programs are exercised in CI by feeding real terminal output through the
-> parser. Settings are real, too: a JSON file, a settings window with a live
-> preview, eight palettes, and select-and-copy. So are windows: **⌘N** opens
-> another with its own shell, and closing one is not a dead end.
+> parser. Settings are real, too: a JSON file, live preview, eight palettes,
+> recorded shortcuts, and custom shells. **⌘F** searches scrollback, **⌘⇧P**
+> opens the command palette, and tabs can be reordered. **⌘N** opens another
+> window with its own shell, and closing one is not a dead end.
 >
-> It is not yet a daily driver. Missing: search, and the Metal renderer
+> It is not yet a daily driver. Missing: session recovery, and the Metal renderer
 > that will replace CoreText drawing.
 >
 > See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned and
@@ -123,7 +124,7 @@ of its own settings file.
 | `make screen-test` | Feed real output through the parser and dump the screen |
 | `make resize-test` | Proof that the view and the shell agree on the grid |
 | `make window-test` | Close a window and get a working shell back |
-| `make tabs-test` | A tab strip, tabs made, switched and closed independently |
+| `make tabs-test` | A tab strip, including tab reordering, independent switching and closing |
 | `make mouse-test` | Mouse reporting bytes, asserted headlessly |
 | `make shell-integration-test` | A real zsh, reporting what it is doing |
 | `make notify-test` | A long command in a background tab, announced |
@@ -139,7 +140,7 @@ asserted in text rather than by eye:
 | `--screen-debug "<cmd>"` | The same screen with blanks shown as `·` |
 | `--theme-test` | Every preset, and the contrast of every colour in it |
 | `--menu-test` | The menu bar and its key equivalents |
-| `--settings-test` | The settings window's tabs and what each control loaded |
+| `--settings-test` | The settings window's pages and what each control loaded |
 | `--resize-test` | The grid the view reports against the grid the shell is told |
 
 `make check` is the gate: it must pass before any change is considered done.

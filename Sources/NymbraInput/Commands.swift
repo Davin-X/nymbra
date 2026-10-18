@@ -25,6 +25,7 @@ public enum Command: String, CaseIterable, Sendable {
     case find
     case findNext
     case findPrevious
+    case commandPalette
     case settings
     case increaseFontSize
     case decreaseFontSize
@@ -66,6 +67,8 @@ public enum Command: String, CaseIterable, Sendable {
             return "Find Next"
         case .findPrevious:
             return "Find Previous"
+        case .commandPalette:
+            return "Command Palette"
         case .settings:
             return "Settings\u{2026}"
         case .increaseFontSize:
@@ -112,6 +115,8 @@ public enum Command: String, CaseIterable, Sendable {
             return "Jump to the next match"
         case .findPrevious:
             return "Jump to the previous match"
+        case .commandPalette:
+            return "Search and run any Nymbra command"
         case .settings:
             return "Open this window"
         case .increaseFontSize:
@@ -161,6 +166,8 @@ public enum Command: String, CaseIterable, Sendable {
             return Shortcut(parsing: "cmd+g")
         case .findPrevious:
             return Shortcut(parsing: "cmd+shift+g")
+        case .commandPalette:
+            return Shortcut(parsing: "cmd+shift+p")
         case .settings:
             return Shortcut(parsing: "cmd+comma")
         case .increaseFontSize:

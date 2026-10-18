@@ -116,7 +116,7 @@ func runMenuTest(configuration: Configuration) {
 /// what each control loaded, and exit without showing anything.
 func runSettingsTest(configuration: Configuration) {
     let controller = SettingsWindowController(configuration: configuration) { _ in }
-    print("tabs\t" + controller.tabTitles.joined(separator: ","))
+    print("pages\t" + controller.pageTitles.joined(separator: ","))
     print("appearance\t" + controller.appearanceSummary)
     print("presets\t" + controller.presetTitles.joined(separator: ","))
     for binding in controller.shortcutBindings {
@@ -984,6 +984,13 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     let ids = strip.tabViewItems.compactMap { $0.identifier as? TabID }
     let created = madeFirst && madeSecond && ids.count == 3
 
+    window.reorderTab(ids[0], to: 2)
+    let reorderedIDs = strip.tabViewItems.compactMap { $0.identifier as? TabID }
+    let reorderWorked = reorderedIDs == [ids[1], ids[2], ids[0]]
+        && strip.tabViewItems.last === window.plusItem
+        && window.focusedTab == ids[2]
+    window.reorderTab(ids[0], to: 0)
+
     // Each tab has exactly one pane and its own shell, and no two are the same
     // process — which is the property a window with one shared shell could not
     // have.
@@ -1089,14 +1096,15 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
         + "title=\(titleFollows && backgroundIsQuiet ? 1 : 0) "
         + "unread=\(backWasMarked && frontWasClean && readingClearsIt ? 1 : 0) closed=\(remaining.count) "
         + "sameShells=\(sameShells && stillAlive && outputHeld ? 1 : 0) "
-        + "lastTabClosesWindow=\(windowClosed ? 1 : 0) onlyStrip=\(onlyStrip ? 1 : 0)")
+        + "lastTabClosesWindow=\(windowClosed ? 1 : 0) onlyStrip=\(onlyStrip ? 1 : 0) "
+        + "reordered=\(reorderWorked ? 1 : 0)")
 
     // Left to the process exiting, but terminated explicitly so a failure does not
     // leave shells behind on a test runner.
     for tab in ids {
         for pane in window.panes(in: tab).values { pane.terminal.terminate() }
     }
-    return stripVisible && onlyStrip && plusIsLast && plusIsNotTab && created && ownShells
+    return stripVisible && onlyStrip && plusIsLast && plusIsNotTab && created && reorderWorked && ownShells
         && independent && movedForward && movedBack && titleFollows && backgroundIsQuiet
         && closedCleanly && sameShells && stillAlive && outputHeld && windowClosed
 }

@@ -24,18 +24,35 @@ final class TabStripView: NSTabView {
     /// callback: the tab view's own selection machinery has no notion of a button.
     var onAddTab: (() -> Void)?
 
+    /// A tab was released over another tab; the window owns the item ordering.
+    var onTabReorder: ((NSTabViewItem, Int) -> Void)?
+
+    private var pressedTab: NSTabViewItem?
+
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if let item = tabViewItem(at: point), item === plusItem {
+        let item = tabViewItem(at: point)
+        if let item, item === plusItem {
             onAddTab?()
             return
         }
+        pressedTab = item
         super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        defer { pressedTab = nil }
+        guard let pressedTab,
+              let target = tabViewItem(at: convert(event.locationInWindow, from: nil)),
+              target !== plusItem,
+              target !== pressedTab else { return }
+        onTabReorder?(pressedTab, indexOfTabViewItem(target))
     }
 
     override func rightMouseDown(with event: NSEvent) {
         let item = tabViewItem(at: convert(event.locationInWindow, from: nil))
-        guard let item else {
+        guard let item, item !== plusItem else {
             super.rightMouseDown(with: event)
             return
         }

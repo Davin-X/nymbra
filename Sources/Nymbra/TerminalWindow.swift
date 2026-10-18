@@ -11,9 +11,27 @@ import UserNotifications
 ///
 /// All shell spawning goes through `posix_spawn` (ADR-0007), so a second tab —
 /// like a second window or a split — can be started after AppKit is running.
-final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
+final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSToolbarDelegate,
+    NSTextFieldDelegate, NSSearchFieldDelegate {
     let window: NSWindow
     let tabView: TabStripView
+    private let findSearchField = FindSearchField()
+
+    private enum ToolbarItemID {
+        static let find = NSToolbarItem.Identifier("nymbra.find")
+    }
+
+    private final class FindSearchField: NSSearchField {
+        var onCancel: (() -> Void)?
+
+        override func keyDown(with event: NSEvent) {
+            if event.keyCode == 53 {
+                onCancel?()
+                return
+            }
+            super.keyDown(with: event)
+        }
+    }
 
     /// Every tab, by identity. The focused tab's container is the one in the
     /// window hierarchy.
@@ -83,6 +101,11 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         window.setContentSize(frame.size)
         window.center()
         window.isReleasedWhenClosed = false
+        let toolbar = NSToolbar(identifier: NSToolbar.Identifier("nymbra.window-toolbar"))
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
 
         // A window that will not be a tab of somebody else's window. Nymbra's tabs
         // are inside it (see the note in `main.swift`); the system's would be a
@@ -101,6 +124,15 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         tabView.plusItem = plusItem
         tabView.onTabRightClick = { [weak self] item in self?.showTabMenu(for: item) }
         tabView.onAddTab = { [weak self] in _ = self?.newTab() }
+        tabView.onTabReorder = { [weak self] item, index in self?.reorderTab(item, to: index) }
+        findSearchField.placeholderString = "Find in terminal"
+        findSearchField.delegate = self
+        findSearchField.onCancel = { [weak self] in self?.cancelFind() }
+        findSearchField.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            findSearchField.widthAnchor.constraint(equalToConstant: 240),
+            findSearchField.heightAnchor.constraint(equalToConstant: 28),
+        ])
 
         let first = TerminalWindow.firstTab
         let tab = try TerminalTab(configuration: configuration)
@@ -203,6 +235,23 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         tabView.tabViewItems.compactMap { $0.identifier as? TabID }
     }
 
+    private func reorderTab(_ item: NSTabViewItem, to destinationIndex: Int) {
+        guard item !== plusItem, let id = item.identifier as? TabID else { return }
+        reorderTab(id, to: destinationIndex)
+    }
+
+    func reorderTab(_ id: TabID, to destinationIndex: Int) {
+        guard let item = tabs[id]?.item, tabIDs.count > 1 else { return }
+        let currentIndex = tabView.indexOfTabViewItem(item)
+        guard currentIndex >= 0, currentIndex != destinationIndex else { return }
+
+        let selectedTab = focusedTab
+        tabView.removeTabViewItem(item)
+        let insertionIndex = min(max(destinationIndex, 0), tabIDs.count)
+        tabView.insertTabViewItem(item, at: insertionIndex)
+        selectTab(selectedTab)
+    }
+
     func selectNextTab() {
         let ids = tabIDs
         guard ids.count > 1, let index = ids.firstIndex(of: focusedTab) else { return }
@@ -213,6 +262,49 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         let ids = tabIDs
         guard ids.count > 1, let index = ids.firstIndex(of: focusedTab) else { return }
         selectTab(ids[(index - 1 + ids.count) % ids.count])
+    }
+
+    func beginFind() {
+        if window.toolbar?.items.contains(where: { $0.itemIdentifier == ToolbarItemID.find }) != true {
+            window.toolbar?.insertItem(withItemIdentifier: ToolbarItemID.find, at: 0)
+        }
+        focusedView?.startFind(query: findSearchField.stringValue)
+        window.makeFirstResponder(findSearchField)
+        findSearchField.selectText(nil)
+    }
+
+    private func cancelFind() {
+        findSearchField.stringValue = ""
+        focusedView?.endFind()
+        window.makeFirstResponder(focusedView)
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        guard let field = notification.object as? NSSearchField, field === findSearchField else { return }
+        focusedView?.updateFind(query: field.stringValue)
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, ToolbarItemID.find]
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, ToolbarItemID.find]
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard itemIdentifier == ToolbarItemID.find else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = "Find"
+        item.paletteLabel = "Find in Terminal"
+        item.toolTip = "Search terminal output"
+        item.view = findSearchField
+        item.visibilityPriority = .high
+        return item
     }
 
     /// Bring a tab to the front.

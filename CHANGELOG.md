@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a command palette, recorded shortcuts and a useful tab strip
+
+- **Command Palette** (`⌘⇧P`) searches Nymbra's commands, shows their current
+  shortcuts, and supports arrow-key selection and Return to run.
+- **Keyboard settings** record a shortcut from the key combination itself,
+  reject unmodified keys and conflicts, and let a command return to its default.
+- **Custom shells** accept an absolute path only when it names an existing,
+  executable file; the selected shell is used for new sessions.
+- **Tabs** can be reordered by dragging one onto another, keeping the `+` item
+  at the end and preserving the selected terminal.
+- **Find** is available from a visible toolbar search field as well as `⌘F`;
+  Escape closes it, and the existing next/previous commands continue to work.
+- Settings now follow the concept's page order: Appearance, Keyboard, Shell,
+  Behaviour and Advanced. The Appearance page groups preview, fonts and theme
+  presets; Advanced contains colour overrides and configuration access. Keyboard
+  shortcuts can be filtered by command name or description.
+- **A text field's own `keyDown` never sees an arrow, Return or Escape**: while a
+  field is being edited the first responder is the field's editor, an `NSTextView`.
+  The palette and the toolbar's find field take those keys in the delegate method
+  that actually receives them — measured rather than assumed — which is what makes
+  `↑ ↓`, Return and Escape work. Recording a shortcut also stops when the settings
+  window closes, so an abandoned recording cannot swallow Escape application-wide.
+- `--palette-test` drives the palette with real key events: the rows it lists for
+  a query, the row that is highlighted, Return running it, and Escape closing it.
+  `--window-test` does the same for the find field, against a live shell.
+
 ### Removed — a stray terminal recording that had been committed
 
 `typescript` was a 481-byte `script(1)` recording of a shell session, swept into a
