@@ -65,9 +65,10 @@ An unknown name or a value that is not `#rrggbb` is dropped with a warning.
 ### Shell integration
 
 `shellIntegration` asks the shell to report what it is doing, with `OSC 133`
-marks: where a prompt starts, when a command runs, and when it finishes and with
-what status. zsh only, so far — a *login* bash reads `.bash_profile` and never
-`.bashrc`, so it needs a different mechanism again.
+marks: where a prompt starts, when a command runs — and *which* command, the line
+as it was typed — and when it finishes and with what status. zsh only, so far — a
+*login* bash reads `.bash_profile` and never `.bashrc`, so it needs a different
+mechanism again.
 
 Turning it on does not edit anything of yours. Nymbra starts the shell with
 `ZDOTDIR` pointing at a directory of its own inside the application support

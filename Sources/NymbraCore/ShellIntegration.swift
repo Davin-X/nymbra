@@ -21,11 +21,62 @@ public enum ShellMark: Equatable, Sendable {
     case promptStart
     /// `OSC 133 ; B` — the prompt has been printed; the command line starts here.
     case commandStart
-    /// `OSC 133 ; C` — the command is about to run.
-    case commandExecuted
+    /// `OSC 133 ; C` — the command is about to run. The payload is the line as it
+    /// was typed, or `nil` when the shell did not say which command it is running.
+    ///
+    /// It is not the command that *ran*: aliases are not expanded, a variable is
+    /// recorded as it was written, and no shell that reports this way claims
+    /// otherwise. What it is, is what was asked for — which is what a record of
+    /// what you ran is for.
+    case commandExecuted(String?)
     /// `OSC 133 ; D` — the command finished, with its exit status when the shell
     /// reported one.
     case commandFinished(Int32?)
+}
+
+/// `%XX` back to bytes, which is how the command travels inside a `C` mark.
+///
+/// Percent-encoding is not decoration here: a command can contain a BEL or an
+/// ESC, and either would end the sequence before the terminal had finished
+/// reading it. The encoding is the one every shell and terminal that reports
+/// commands already shares, so a command recorded by Nymbra is readable by
+/// anything else that understands `OSC 133`, and the reverse.
+///
+/// Malformed input is left exactly as it was rather than guessed at or dropped: a
+/// `%` not followed by two hex digits is a `%`. This runs on whatever a shell
+/// sends, and a decoder that can surprise you is the wrong half of a protocol to
+/// be clever in.
+enum PercentEncoding {
+    static func decode(_ text: String) -> String {
+        let input = Array(text.utf8)
+        var output = [UInt8]()
+        output.reserveCapacity(input.count)
+        var index = 0
+        while index < input.count {
+            let byte = input[index]
+            if byte == 0x25, index + 2 < input.count,
+               let high = hex(input[index + 1]), let low = hex(input[index + 2]) {
+                output.append(high << 4 | low)
+                index += 3
+            } else {
+                output.append(byte)
+                index += 1
+            }
+        }
+        // Not a validating decode: a byte sequence that is not UTF-8 becomes the
+        // replacement character, because a command that came from a shell is
+        // worth showing even when part of it cannot be read.
+        return String(decoding: output, as: UTF8.self)
+    }
+
+    private static func hex(_ byte: UInt8) -> UInt8? {
+        switch byte {
+        case 0x30...0x39: return byte - 0x30                    // 0-9
+        case 0x41...0x46: return byte - 0x41 + 10               // A-F
+        case 0x61...0x66: return byte - 0x61 + 10               // a-f
+        default: return nil
+        }
+    }
 }
 
 /// Teaching a shell to say what it is doing, without touching the user's files.
@@ -123,7 +174,7 @@ public struct ShellIntegration: Sendable {
     # the pty.
     #
     #   A   a prompt is about to be printed
-    #   C   the command is about to run
+    #   C   the command is about to run, with the line as it was typed
     #   D   the command finished, with its exit status
     #
     # `B`, which marks where the command line begins, is deliberately not sent.
@@ -139,9 +190,40 @@ public struct ShellIntegration: Sendable {
 
     typeset -g __nymbra_running=0
 
+    # Percent-encodes a command into `$__nymbra_encoded` for the `C` mark below.
+    #
+    # Eight bytes are rewritten, and each one is there for a reason: BEL and ESC
+    # would end the sequence before the terminal had finished reading it (BEL
+    # terminates an OSC, ESC begins the `ESC \` it also accepts as a terminator); a
+    # semicolon separates the mark's own key/value fields; a percent sign has to
+    # survive being the escape character; and tab, newline, carriage return and
+    # delete are control bytes a line can contain that a sequence does not carry —
+    # the parser drops them — so they are encoded rather than lost.
+    #
+    # Everything else, spaces and quotes and pipes and UTF-8 included, travels
+    # exactly as typed, so what comes out the other end is the command rather than a
+    # mangled echo of it.
+    #
+    # It assigns rather than prints because `$(...)` would fork a subshell on every
+    # command a person runs, and this runs on every command a person runs.
+    function __nymbra_encode() {
+      __nymbra_encoded=$1
+      __nymbra_encoded=${__nymbra_encoded//'%'/'%25'}
+      __nymbra_encoded=${__nymbra_encoded//$'\a'/'%07'}
+      __nymbra_encoded=${__nymbra_encoded//$'\e'/'%1B'}
+      __nymbra_encoded=${__nymbra_encoded//';'/'%3B'}
+      __nymbra_encoded=${__nymbra_encoded//$'\t'/'%09'}
+      __nymbra_encoded=${__nymbra_encoded//$'\n'/'%0A'}
+      __nymbra_encoded=${__nymbra_encoded//$'\r'/'%0D'}
+      __nymbra_encoded=${__nymbra_encoded//$'\x7f'/'%7F'}
+    }
+
     function __nymbra_preexec() {
       __nymbra_running=1
-      printf '\e]133;C\a'
+      # `$1` is the line as typed. Nothing here reads the command out of the
+      # prompt or off the screen; the shell is asked, because the shell knows.
+      __nymbra_encode "$1"
+      printf '\e]133;C;cmdline_url=%s\a' "$__nymbra_encoded"
     }
 
     function __nymbra_precmd() {

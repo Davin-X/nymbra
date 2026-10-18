@@ -440,17 +440,42 @@ public final class Parser {
     /// this does not recognise is dropped rather than guessed at, and none of
     /// them is ever written to the screen.
     private func shellMark(_ payload: String) {
-        // The mark is the payload up to the first `;`; only `D` carries more.
+        // The mark is the payload up to the first `;`; only `C` and `D` carry more.
         switch payload.prefix(while: { $0 != ";" }) {
         case "A": onShellMark?(.promptStart)
         case "B": onShellMark?(.commandStart)
-        case "C": onShellMark?(.commandExecuted)
+        case "C": onShellMark?(.commandExecuted(command(in: payload)))
         case "D":
             // `D` alone is "finished, status not reported"; `D;0` is success.
             let status = payload.split(separator: ";", omittingEmptySubsequences: false).dropFirst().first
             onShellMark?(.commandFinished(status.flatMap { Int32($0) }))
         default: break
         }
+    }
+
+    /// The command a `C` mark carries, if it carries one.
+    ///
+    /// `OSC 133 ; C ; cmdline_url=<percent-encoded>` — a key in the mark's
+    /// key/value list, which is the shape the shells and terminals that report
+    /// commands already share, so what Nymbra records is readable elsewhere and the
+    /// reverse. `cmdline_url` rather than kitty's shell-quoted `cmdline` because a
+    /// command is arbitrary text: it can hold a BEL or an ESC, and either would end
+    /// the sequence before the terminal had finished reading it.
+    ///
+    /// A bare `C` — what a shell that has not been taught to report the command
+    /// sends, including every version of our own snippet before this one — is
+    /// `nil`, and so is an empty value: an empty command is not a command, and
+    /// there is no such thing as running one.
+    private func command(in payload: String) -> String? {
+        let prefix = "cmdline_url="
+        // Drop the mark letter itself; what is left is the key/value list.
+        for field in payload.split(separator: ";", omittingEmptySubsequences: false).dropFirst()
+            where field.hasPrefix(prefix) {
+            let encoded = field.dropFirst(prefix.count)
+            guard !encoded.isEmpty else { return nil }
+            return PercentEncoding.decode(String(encoded))
+        }
+        return nil
     }
 
     // MARK: - UTF-8

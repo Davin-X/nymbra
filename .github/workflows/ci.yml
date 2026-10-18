@@ -161,7 +161,7 @@ jobs:
           wait "$pid" 2>/dev/null || true
           cat integration.err >&2 || true
           cat integration.out
-          grep -q "prompt=1 executed=1 finished=1 failed=1 userConfig=1" integration.out \
+          grep -q "prompt=1 executed=1 finished=1 failed=1 userConfig=1 command=1 encoding=1" integration.out \
             || { echo "::error::shell integration did not report what zsh was doing"; exit 1; }
           echo "Shell integration passed"
 
