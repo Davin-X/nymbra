@@ -954,6 +954,7 @@ func runShellIntegrationTest() -> Bool {
         // merely the parser on the other end of them.
         var configuration = Configuration()
         configuration.behaviour.shellIntegration = true
+        configuration.shell.path = "/bin/zsh"
         guard let integration = configuration.shellIntegration(
             in: generated, userZDOTDIR: userZDOTDIR.path
         ) else {
