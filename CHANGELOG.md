@@ -315,6 +315,13 @@ terminal, and no `zsh` you run by hand, is touched by it.
   finished drawing its prompt is to define its `zle-line-init` widget, and that
   is the line editor itself, the one part of a shell where being second in line
   is worse than not being there. Nothing built so far needs `B`.
+- **The generated startup files now use the user's actual `ZDOTDIR` (or `$HOME`
+  if unset) to find their startup files, rather than a value captured at Nymbra
+  launch time.** This means a user who sets `ZDOTDIR` in their environment or
+  `.zshenv` gets their startup files loaded from the right place. The environment
+  variable `NYMBRA_USER_ZDOTDIR` captures the user's `ZDOTDIR` at Nymbra launch
+  time and passes it through the generated directory to the user's actual
+  startup files.
 - Not wired to a setting yet. This lands the mechanism and the proof of it; the
   opt-in toggle is the change after this one.
 
