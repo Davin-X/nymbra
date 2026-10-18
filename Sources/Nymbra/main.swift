@@ -603,7 +603,22 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     pump(0.6)
     let backgroundIsQuiet = window.window.title == titleInFront
 
-    // 6. Closing one tab leaves the others exactly as they were: the same shells,
+    // 6. The unread badge. A tab that printed while it was in the back is marked;
+    //    the one in front is not, because output you are watching is not news;
+    //    and looking at a marked tab clears it. The mark is read off the strip's
+    //    own label, so what is asserted is the thing drawn rather than a flag
+    //    beside it — a dot that is set but never painted would pass the wrong
+    //    test.
+    func stripLabel(_ id: TabID) -> String {
+        strip.tabViewItems.first { ($0.identifier as? TabID) == id }?.label ?? ""
+    }
+    let backWasMarked = window.isUnread(background) && stripLabel(background).contains("•")
+    let frontWasClean = !window.isUnread(front) && !stripLabel(front).contains("•")
+    window.selectTab(background)
+    let readingClearsIt = !window.isUnread(background) && !stripLabel(background).contains("•")
+    window.selectTab(front)
+
+    // 7. Closing one tab leaves the others exactly as they were: the same shells,
     //    still holding their own output. A tab closed must not have disturbed the
     //    sessions beside it.
     let survivors = ids.filter { $0 != ids[1] }
@@ -628,7 +643,8 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     print("tabs-test\tstrip=\(stripVisible ? 1 : 0) plus=\(plusIsLast && plusIsNotTab ? 1 : 0) "
         + "created=\(created ? 1 : 0) ownShells=\(ownShells ? 1 : 0) "
         + "independent=\(independent ? 1 : 0) switched=\(movedForward && movedBack ? 1 : 0) "
-        + "title=\(titleFollows && backgroundIsQuiet ? 1 : 0) closed=\(remaining.count) "
+        + "title=\(titleFollows && backgroundIsQuiet ? 1 : 0) "
+        + "unread=\(backWasMarked && frontWasClean && readingClearsIt ? 1 : 0) closed=\(remaining.count) "
         + "sameShells=\(sameShells && stillAlive && outputHeld ? 1 : 0) "
         + "lastTabClosesWindow=\(windowClosed ? 1 : 0)")
 
