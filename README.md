@@ -125,6 +125,8 @@ of its own settings file.
 | `make window-test` | Close a window and get a working shell back |
 | `make tabs-test` | A tab strip, tabs made, switched and closed independently |
 | `make mouse-test` | Mouse reporting bytes, asserted headlessly |
+| `make shell-integration-test` | A real zsh, reporting what it is doing |
+| `make notify-test` | A long command in a background tab, announced |
 | `make check` | Everything CI runs |
 | `make clean` | Remove build output |
 
@@ -185,7 +187,7 @@ Full detail, including the threading model and the invariants that must hold:
 | M2 | Settings, configuration, palettes, select and copy | ✅ complete |
 | M1.x | Tabs and splits | ✅ done |
 | M3 | Metal renderer, search, reflow, mouse | 🔨 search, reflow and mouse done; Metal renderer next |
-| M4 | Shell integration (OSC 133) and notifications | 🔨 a zsh integration emits the marks, behind an off-by-default setting; the badge and notifications next |
+| M4 | Shell integration (OSC 133) and notifications | 🔨 zsh marks behind an off-by-default setting, and a long command that finishes out of sight is announced; click-to-focus, `bash`/`fish` and the timeline next |
 | M5 | Sessions: a PTY host that outlives the window | planned |
 | M6 | Signed, notarized release and updater | ⏳ bundle and icon done; signing remains |
 

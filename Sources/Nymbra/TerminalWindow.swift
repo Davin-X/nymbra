@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import NymbraCore
+import UserNotifications
 
 /// One window: a set of tabs, each with its own layout of panes.
 ///
@@ -327,6 +328,90 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
     private func updateAllLabels() {
         for id in tabs.keys { updateLabel(for: id) }
     }
+
+    // MARK: - Commands that finish
+
+    /// A command finished in one of this window's shells.
+    ///
+    /// The rules for whether anybody should hear about it belong to
+    /// `CommandAttention` and are tested there. What is gathered here is the two
+    /// facts the shell cannot know: whether the person was already looking, and
+    /// what this tab is called. A shell that reports no marks never reaches this
+    /// method at all.
+    ///
+    /// - Parameters:
+    ///   - status: the exit status, when the shell reported one.
+    ///   - seconds: how long the command took.
+    func commandFinished(in id: TabID, status: Int32?, seconds: Double) {
+        guard let tab = tabs[id] else { return }
+        guard let announcement = CommandAttention.announcement(
+            status: status,
+            seconds: seconds,
+            threshold: configuration.behaviour.notifyAfterSeconds,
+            isWatched: isBeingWatched(id),
+            subject: tab.displayName
+        ) else { return }
+        deliver(announcement, id)
+    }
+
+    /// Whether this tab is one the person is looking at: the tab in front, in the
+    /// key window, in the active application.
+    ///
+    /// Three questions rather than one, because each can be false on its own. A
+    /// window can be in front of this application's other windows without being
+    /// the key one; an application can be active with a *different* window key;
+    /// and the person can be in another application entirely with this one
+    /// visible behind it. Only all three together mean "they are watching this".
+    private func isBeingWatched(_ id: TabID) -> Bool {
+        id == focusedTab && window.isKeyWindow && NSApp.isActive
+    }
+
+    /// Where an announcement goes.
+    ///
+    /// The default posts a notification; a test replaces it. That seam exists
+    /// because there is no other way to observe what was *decided*:
+    /// `UNUserNotificationCenter.current()` does not return an error outside an
+    /// application bundle, it **aborts** — an `NSInternalInconsistencyException`
+    /// about `bundleProxyForCurrentProcess` — and `make check` runs the bare
+    /// executable. A harness that could not see past that line would have to test
+    /// the rule indirectly or not at all.
+    var deliver: (CommandAttention.Announcement, TabID) -> Void = TerminalWindow.post
+
+    /// Post a notification, if this process is allowed to have one. Main thread
+    /// only, which is where the marks are delivered.
+    static func post(_ announcement: CommandAttention.Announcement, for id: TabID) {
+        assert(Thread.isMainThread)
+        // Not politeness — outside a bundle the call below does not fail, it
+        // aborts. `swift run` and every headless test are outside one.
+        guard Bundle.main.bundleIdentifier != nil else { return }
+
+        let center = UNUserNotificationCenter.current()
+        // Asked for once, because the permission prompt is a prompt: it belongs
+        // at the first thing worth telling somebody about, not at launch, and
+        // asking again every time would be noise. `sound` is requested so the
+        // option exists in System Settings, but nothing here plays one — a
+        // terminal that beeps at a finished build is a terminal people turn off.
+        if !askedToNotify {
+            askedToNotify = true
+            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = announcement.title
+        content.body = announcement.body
+        // Unique per announcement so that two finished builds are two
+        // notifications rather than one that replaces the other.
+        let request = UNNotificationRequest(
+            identifier: "nymbra.command.\(id.raw).\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        center.add(request)
+    }
+
+    /// Whether this process has already asked for permission to notify. Main
+    /// thread only; see `post`.
+    private static var askedToNotify = false
 
     // MARK: - Tab context menu
 

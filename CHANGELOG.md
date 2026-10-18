@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a notification when a long command finishes
+
+`behaviour.notifyAfterSeconds` (`docs/CONFIG.md`) is how long a command has to run
+before Nymbra mentions it once it is done, and only when it did not finish in
+front of you. Ten seconds by default; `0` turns it off. It needs the shell
+integration from below, because how long a command took is not something a
+terminal can read out of the output — a prompt and a command's output are the same
+bytes, and only the shell knows which is which.
+
+- Both halves are the shell's own marks: `C` says a command is about to run, `D`
+  says it has finished and with what status, and the gap between the two *is* the
+  duration. Nothing is parsed out of the command line, and nothing depends on the
+  line editor.
+- The rule that decides whether to speak is a pure function of four facts — how
+  long it took, how it went, the threshold, and whether the tab was in front of
+  you in an active Nymbra — and lives in `CommandAttention`, where it is tested
+  without a window and without a notification.
+- A failing command is **not** special-cased. A typo fails in milliseconds, so
+  announcing failures would announce everything anybody ever mistyped. A failure
+  that took a long time is announced, and leads with its status.
+- A tab in front of you in an active application is not announced *at* you: you
+  watched it finish. That is three separate questions — the tab, the key window,
+  the active application — because each can be false on its own.
+- Delivery is a seam, and honestly so. Outside an application bundle
+  `UNUserNotificationCenter.current()` does not return an error, it **aborts**
+  (`NSInternalInconsistencyException`, `bundleProxyForCurrentProcess is nil`) —
+  which is what `swift run`, and every headless test, are. So `deliver` has a real
+  default and the tests replace it, which is the only way to assert on a decision
+  on this side of that wall.
+- Timed per *pane*, not per tab: a tab can hold several shells, and each runs its
+  own command. A duration measured on the wrong one looks right and is not.
+- `notifyAfterSeconds` is clamped like every other setting, so a configuration
+  file still cannot break the app: negative values clamp to `0`, and anything past
+  a day to a day.
+- `--notify-test` runs a real zsh, times a 1.2-second command in a background tab,
+  and asserts what was announced — then that a short command and a threshold of
+  `0` both stay quiet. It catches the wiring, which nothing else can: cutting the
+  mark handler makes it fail loudly.
+- Clicking the notification does not yet focus the tab, and notifications are
+  posted silently. A terminal that beeps at a finished build is one people turn
+  off.
+
 ### Added — a setting for the shell integration, off until asked for
 
 `behaviour.shellIntegration` (`docs/CONFIG.md`) turns on the zsh integration from

@@ -69,6 +69,17 @@ final class TerminalTab {
         view.onInput = { [weak terminal] bytes in terminal?.send(bytes) }
         view.onResize = { [weak terminal] size in terminal?.resize(size) }
         view.onFocus = { [weak self] in self?.focus(id) }
+        // The shell's own account of what it was asked to run and how it went.
+        // It is the only way to know when a command *started* and stopped, which
+        // is what a duration is: a prompt and a command's output are the same
+        // bytes otherwise. A shell that has not been taught to report sends
+        // nothing here, and then nothing happens.
+        terminal.onShellMark = { [weak self, weak pane] mark in
+            guard let self, let pane, let tab = self.item?.identifier as? TabID else { return }
+            guard let finished = pane.commands.note(mark) else { return }
+            self.host?.commandFinished(in: tab, status: finished.status,
+                                       seconds: finished.seconds)
+        }
         terminal.onUpdate = { [weak self, weak view] in
             guard let view else { return }
             view.needsDisplay = true

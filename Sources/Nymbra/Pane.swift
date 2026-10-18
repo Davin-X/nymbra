@@ -13,6 +13,12 @@ final class Pane {
     let terminal: Terminal
     let view: TermView
 
+    /// Times the command this pane's shell is running, from the marks the shell
+    /// sends. Per pane rather than per tab, because a tab can hold several
+    /// shells and each of them runs its own command — a duration measured on the
+    /// wrong one would be a number that looks right and is not.
+    var commands = CommandTimer()
+
     init(id: PaneID, terminal: Terminal, view: TermView) {
         self.id = id
         self.terminal = terminal

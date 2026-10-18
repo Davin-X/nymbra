@@ -19,7 +19,7 @@ ignored. A terminal must never refuse to start because of its own settings file.
 |---------|-------------|
 | `appearance` | Font family and size |
 | `colours` | Colour preset and per-colour overrides |
-| `behaviour` | Cursor, scrollback, confirm-on-close, shell integration |
+| `behaviour` | Cursor, scrollback, confirm-on-close, shell integration, notifications |
 | `keyboard` | Keybinding overrides |
 | `shell` | Login shell path |
 
@@ -60,6 +60,7 @@ An unknown name or a value that is not `#rrggbb` is dropped with a warning.
 | `scrollbackLines` | integer | `10000` | |
 | `confirmBeforeClosingRunningSession` | boolean | `true` | |
 | `shellIntegration` | boolean | `false` | `OSC 133` marks; zsh only, and only for shells started afterwards |
+| `notifyAfterSeconds` | number | `10` | Announce a finished command that took at least this long; `0` never |
 
 ### Shell integration
 
@@ -76,6 +77,22 @@ Turning it off stops pointing at them; there is nothing to undo.
 It takes effect for shells started *after* the change. A shell already running
 keeps the environment it was born with, and an environment cannot be handed to a
 process that has already started — so open a tab or a window.
+
+### Notifications
+
+`notifyAfterSeconds` is how long a command must run before Nymbra mentions it when
+it finishes — but only when you were not looking at that tab. `0` turns them off.
+
+Ten seconds by default, because the alternative is a terminal that will not stop
+talking: a shell runs dozens of commands a minute, and a notification for each is
+a firehose rather than a feature. Nothing under the threshold is announced however
+it went, including a command that failed fast — which is exactly what a mistyped
+command does.
+
+It needs `shellIntegration` on, for a shell started afterwards. How long a command
+took is not visible in a terminal's output: a prompt and a command's output are
+the same bytes, and only the shell itself knows where one ended and the other
+began.
 
 ## keyboard
 
@@ -114,7 +131,8 @@ Command names: `copy`, `paste`, `selectAll`, `clearBuffer`, `settings`,
     "cursorBlinks": true,
     "scrollbackLines": 10000,
     "confirmBeforeClosingRunningSession": true,
-    "shellIntegration": false
+    "shellIntegration": false,
+    "notifyAfterSeconds": 10
   },
   "keyboard": {
     "overrides": {}

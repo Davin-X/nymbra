@@ -61,8 +61,8 @@ visible rather than discovered later.
 | Text reflow on resize | ✅ live screen and history rewrap on resize; soft-wrapped rows are rejoined and rewrapped | — |
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
 | Settings: theme, font, colours, cursor, keybindings | ✅ one JSON file, a settings window with live preview, and a readable palette | M2 |
-| Shell integration: prompt/command boundaries, notifications | ⚠️ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events, a bundled zsh integration emits `A`/`C`/`D`, and `behaviour.shellIntegration` turns it on; `B`, the settings-window toggle, `bash`/`fish`, and the badge, notification and timeline built on the marks remain | M4 |
-| Per-tab unread badge | ✅ a tab marks itself with a dot when it prints in the background, cleared by looking at it; the "command finished" form needs the `OSC 133` marks, which now parse | M4 |
+| Shell integration: prompt/command boundaries, notifications | ⚠️ `OSC 133` marks (`A`/`B`/`C`/`D` with the exit status) parse into `ShellMark` events, a bundled zsh integration emits `A`/`C`/`D`, `behaviour.shellIntegration` turns it on, and a long command that finished in a tab you were not looking at is announced (`behaviour.notifyAfterSeconds`); `B`, the settings-window toggle, click-to-focus, `bash`/`fish`, the timeline and the digest remain | M4 |
+| Per-tab unread badge | ✅ a tab marks itself with a dot when it prints in the background, cleared by looking at it — which already covers a finished command, since the shell draws a new prompt when one ends | M4 |
 | Session recovery/persistence | ❌ | M5 |
 | Colour legibility for program-chosen colours | ✅ `Palette.readable` lifts any foreground below 4.5:1 | — |
 
@@ -261,11 +261,16 @@ Nymbra loads the integration itself instead of adding a line to your dotfiles.
   zsh integration emits them, and `behaviour.shellIntegration` turns it on for
   shells started afterwards (so far `A`/`C`/`D`: see the changelog for why `B`
   waits, and `bash`/`fish` with it)
-- Per-tab **unread badge** when a command finishes in a background tab — the
-  *output* form has landed (a tab marks itself with a dot while printing in the
-  background, cleared by looking at it); the *finished* form needs the `OSC 133`
-  above, so it needs the prompt boundaries first
-- **Notification** when a long command finishes; click to focus the tab
+- Per-tab **unread badge** when a command finishes in a background tab — landed,
+  in its *output* form (a tab marks itself with a dot while printing in the
+  background, cleared by looking at it). That already covers a finished command,
+  because the shell draws a new prompt when one ends and a prompt is output; what
+  the `OSC 133` marks buy instead is *how long* it took, which cannot be read out
+  of the stream at all
+- **Notification** when a long command finishes; click to focus the tab — the
+  rules and the delivery have landed, timed from the shell's own `C`→`D` marks,
+  with a threshold (`behaviour.notifyAfterSeconds`) because a firehose is not a
+  feature; clicking the notification does not yet focus the tab
 - **Command timeline**: searchable history of every command, its exit status,
   duration and directory, stored locally
 - A quiet **"what needs you"** digest — three things, not a firehose

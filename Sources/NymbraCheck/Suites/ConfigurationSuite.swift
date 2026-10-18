@@ -16,6 +16,8 @@ func configurationSuite(_ h: Harness) {
             "closing a session that is still running is confirmed by default")
     h.equal(defaults.behaviour.shellIntegration, false,
             "shell integration is off until it is asked for")
+    h.equal(defaults.behaviour.notifyAfterSeconds, 10,
+            "a finished command is announced once it has taken ten seconds")
     h.equal(defaults.colours.preset, .dark, "the default preset is dark")
     h.equal(defaults.appearance.fontSize, 13, "the default font size is 13pt")
     h.equal(defaults.appearance.fontFamily, "Menlo", "the default font is Menlo")
@@ -44,6 +46,7 @@ func configurationSuite(_ h: Harness) {
     edited.behaviour.cursorBlinks = false
     edited.behaviour.scrollbackLines = 500
     edited.behaviour.shellIntegration = true
+    edited.behaviour.notifyAfterSeconds = 30
     edited.shell.path = "/bin/dash"
 
     let saved = tempURL()
@@ -139,6 +142,18 @@ func configurationSuite(_ h: Harness) {
         h.equal(result.warnings.count, 1, "clamping the scrollback is reported")
     }
 
+    withConfiguration(#"{"behaviour": {"notifyAfterSeconds": -5}}"#) { result in
+        h.equal(result.configuration.behaviour.notifyAfterSeconds, 0,
+                "a negative notification threshold clamps to never, the quiet end of the range")
+        h.equal(result.warnings.count, 1, "clamping the notification threshold is reported")
+    }
+
+    withConfiguration(#"{"behaviour": {"notifyAfterSeconds": 999999}}"#) { result in
+        h.equal(result.configuration.behaviour.notifyAfterSeconds, 86_400,
+                "an absurd notification threshold is clamped to a day")
+        h.equal(result.warnings.count, 1, "clamping the notification threshold is reported")
+    }
+
     // Note the `##` delimiters: `"#` would otherwise end the raw string.
     withConfiguration(##"{"colours": {"overrides": {"red": "#ff0000", "chartreuse": "#00ff00", "blue": "nothex"}}}"##) { result in
         h.equal(result.configuration.colours.overrides, ["red": "#ff0000"],
@@ -214,6 +229,8 @@ func configurationSuite(_ h: Harness) {
         #"{"shell": {"path": 42}}"#,
         #"{"shell": {"path": ""}}"#,
         #"{"appearance": {"fontFamily": "   "}}"#,
+        #"{"behaviour": {"notifyAfterSeconds": "soon"}}"#,
+        #"{"behaviour": {"notifyAfterSeconds": 1e999}}"#,
     ]
     for blob in hostile {
         withConfiguration(blob) { result in

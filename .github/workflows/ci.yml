@@ -165,6 +165,26 @@ jobs:
             || { echo "::error::shell integration did not report what zsh was doing"; exit 1; }
           echo "Shell integration passed"
 
+      # A notification when a long command finishes. The length of a command is
+      # what the shell's own marks measure, so this needs a real zsh too — and the
+      # notification is never actually posted here, because a bare executable has
+      # no bundle to post from. What is asserted is the decision.
+      - name: Notification for a long command
+        run: |
+          .build/release/Nymbra --notify-test > notify.out 2> notify.err &
+          pid=$!
+          for _ in $(seq 1 45); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            echo "::error::--notify-test did not finish"
+          fi
+          wait "$pid" 2>/dev/null || true
+          cat notify.err >&2 || true
+          cat notify.out
+          grep -q "announced=1 measured=1 tab=1 failed=1 quiet=1 off=1" notify.out \
+            || { echo "::error::a long command was not announced as it should be"; exit 1; }
+          echo "Notification passed"
+
       - name: Docs present
         run: |
           for f in README.md LICENSE CONTRIBUTING.md CHANGELOG.md \
