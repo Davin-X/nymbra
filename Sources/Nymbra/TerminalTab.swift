@@ -76,6 +76,12 @@ final class TerminalTab {
             }
             host.cancelFind()
         }
+
+        // Track the initial working directory (from spawn).
+        if let tabID = item?.identifier as? TabID {
+            host?.setWorkingDirectory(ProcessInfo.processInfo.environment["PWD"] ?? FileManager.default.currentDirectoryPath, for: tabID, paneID: id)
+        }
+
         // The shell's own account of what it was asked to run and how it went.
         // It is the only way to know when a command *started* and stopped, which
         // is what a duration is: a prompt and a command's output are the same
@@ -86,6 +92,8 @@ final class TerminalTab {
             guard let finished = pane.commands.note(mark) else { return }
             self.host?.commandFinished(in: tab, status: finished.status,
                                        seconds: finished.seconds)
+            // Also feed the timeline (shared across all tabs in the window).
+            self.host?.feedTimeline(mark: mark, tabID: tab, paneID: id)
         }
         terminal.onUpdate = { [weak self, weak view] in
             guard let view else { return }
@@ -274,9 +282,3 @@ final class TerminalTab {
     weak var host: TerminalWindow?
 }
 
-/// One tab's identity inside a window.
-public struct TabID: Hashable, Sendable, CustomStringConvertible {
-    public let raw: Int
-    public init(_ raw: Int) { self.raw = raw }
-    public var description: String { "tab-\(raw)" }
-}

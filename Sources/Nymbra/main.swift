@@ -1294,6 +1294,150 @@ private func reportShellIntegration(_ terminal: Terminal, queue: DispatchQueue,
         Data("nymbra: \(reason)\n--- screen ---\n\(screen)\n--- marks: \(log.all) ---\n".utf8))
 }
 
+/// Command timeline: every finished command is recorded with its command line,
+/// directory, exit status and duration.
+///
+/// The shell marks (`C`/`D`) drive the timeline. A command that runs in a tab
+/// is recorded, persisted to disk, and can be searched. The test runs a real
+/// zsh with integration, waits for commands to finish, and asserts the
+/// timeline contains the expected entries with the right fields.
+func runTimelineTest(configuration: Configuration) -> Bool {
+    // Follow the same pattern as runShellIntegrationTest: a standalone Terminal
+    // on its own queue, so the shell is properly interactive and sends marks.
+    guard access("/bin/zsh", X_OK) == 0 else {
+        print("timeline-test\tskipped=true reason=no-zsh")
+        return true
+    }
+
+    let fileManager = FileManager.default
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("nymbra-timeline-\(getpid())")
+    let userZDOTDIR = root.appendingPathComponent("user")
+    let generated = root.appendingPathComponent("generated")
+    defer { try? fileManager.removeItem(at: root) }
+
+    do {
+        try fileManager.createDirectory(at: userZDOTDIR, withIntermediateDirectories: true)
+        try "export NYMBRA_TEST_RC=loaded\nPS1='nymbra-test%# '\n".write(
+            to: userZDOTDIR.appendingPathComponent(".zshrc"),
+            atomically: true, encoding: .utf8)
+    } catch {
+        print("timeline-test\tFAIL: could not create test ZDOTDIR: \(error)")
+        return false
+    }
+
+    var configuration = configuration
+    configuration.behaviour.shellIntegration = true
+    guard let integration = configuration.shellIntegration(
+        in: generated, userZDOTDIR: userZDOTDIR.path
+    ) else {
+        print("timeline-test\tFAIL: the setting was on and the integration was not written")
+        return false
+    }
+
+    let queue = DispatchQueue(label: "dev.nymbra.timeline-test")
+    let terminal: Terminal
+    do {
+        terminal = try Terminal(size: GridSize(rows: 24, cols: 80),
+                                shell: "/bin/zsh",
+                                deliveryQueue: queue,
+                                integration: integration)
+    } catch {
+        print("timeline-test\tFAIL: could not spawn terminal: \(error)")
+        return false
+    }
+
+    let timeline = CommandTimeline(fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("nymbra-timeline-test-\(getpid()).json"))
+    let promptUp = DispatchSemaphore(value: 0)
+    let finishedCmd = DispatchSemaphore(value: 0)
+    let failedCmd = DispatchSemaphore(value: 0)
+    var recordedEntries: [CommandEntry] = []
+
+    // The test only has one "tab" (TabID(0)), so use its directory.
+    let testDirectory = fileManager.currentDirectoryPath
+
+    terminal.onShellMark = { mark in
+        if let entry = timeline.feed(mark: mark, tabID: TabID(0), getDirectory: { _ in testDirectory }) {
+            recordedEntries.append(entry)
+        }
+        switch mark {
+        case .promptStart: promptUp.signal()
+        case .commandFinished(let status):
+            if status == 0 { finishedCmd.signal() }
+            else if status != 0 { failedCmd.signal() }
+        default: break
+        }
+    }
+    terminal.start()
+
+    // Wait for first prompt (shell is ready)
+    guard promptUp.wait(timeout: .now() + 20) == .success else {
+        print("timeline-test\tFAIL: no prompt in 20s")
+        terminal.terminate()
+        return false
+    }
+
+    // Run three commands
+    terminal.send("echo NYMBRA_TIMELINE_OK_1\n")
+    guard finishedCmd.wait(timeout: .now() + 10) == .success else {
+        print("timeline-test\tFAIL: command 1 timeout")
+        terminal.terminate()
+        return false
+    }
+
+    terminal.send("sleep 0.5 && false\n")
+    guard failedCmd.wait(timeout: .now() + 10) == .success else {
+        print("timeline-test\tFAIL: command 2 timeout")
+        terminal.terminate()
+        return false
+    }
+
+    terminal.send("echo NYMBRA_TIMELINE_OK_2\n")
+    guard finishedCmd.wait(timeout: .now() + 10) == .success else {
+        print("timeline-test\tFAIL: command 3 timeout")
+        terminal.terminate()
+        return false
+    }
+
+    // Give timeline time to write
+    queue.sync { _ = timeline.all() }
+
+    // Query the timeline
+    let all = timeline.all()
+    let ok1 = all.contains { $0.command.contains("NYMBRA_TIMELINE_OK_1") && $0.status == 0 }
+    let ok2 = all.contains { $0.command.contains("NYMBRA_TIMELINE_OK_2") && $0.status == 0 }
+    let failed = all.contains { $0.command.contains("false") && $0.status != nil && $0.status != 0 }
+    let durations = all.filter { $0.command.contains("false") }.map(\.duration)
+    let durationOK = durations.contains { $0 >= 0.4 && $0 < 10.0 }
+
+    // Search works
+    let search1 = timeline.search("NYMBRA_TIMELINE_OK_1")
+    let search2 = timeline.search("false")
+    let searchOK = search1.count == 1 && search2.count == 1
+
+    // Filter by status
+    let succeeded = timeline.filter(status: .succeeded)
+    let failedEntries = timeline.filter(status: .failed)
+    let filterOK = succeeded.contains { $0.command.contains("NYMBRA_TIMELINE_OK_1") }
+        && failedEntries.contains { $0.command.contains("false") }
+
+    // Directory is recorded
+    let dirOK = all.allSatisfy { !$0.directory.isEmpty }
+
+    print("timeline-test\trecorded=\(all.count) "
+        + "succeeded=\(ok1 && ok2 ? 1 : 0) failed=\(failed ? 1 : 0) "
+        + "duration=\(durationOK ? 1 : 0) search=\(searchOK ? 1 : 0) "
+        + "filter=\(filterOK ? 1 : 0) dir=\(dirOK ? 1 : 0)")
+
+    if all.count < 3 {
+        print("timeline-test\tentries: \(all.map { "\($0.command)|\($0.status ?? -1)|\($0.duration)s" }.joined(separator: ", "))")
+    }
+
+    terminal.terminate()
+    return all.count >= 3 && ok1 && ok2 && failed && durationOK && searchOK && filterOK && dirOK
+}
+
 /// Tabs, the way they are actually used: a strip that is there to be seen and
 /// clicked, a `+` that makes a tab, and a shell in each that no other tab can
 /// disturb.
@@ -1545,6 +1689,11 @@ func runMouseTest() -> Bool {
 // Dispatch for --mouse-test
 if CommandLine.arguments.contains("--mouse-test") {
     exit(runMouseTest() ? 0 : 1)
+}
+
+// Dispatch for --timeline-test
+if CommandLine.arguments.contains("--timeline-test") {
+    exit(runTimelineTest(configuration: settings) ? 0 : 1)
 }
 
 let app = NSApplication.shared

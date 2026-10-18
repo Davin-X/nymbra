@@ -220,6 +220,11 @@ public struct Configuration: Codable, Equatable, Sendable {
         return base.appendingPathComponent("Nymbra/config.json")
     }
 
+    /// The file the command timeline is written to.
+    public static var timelineFileURL: URL {
+        supportDirectory.appendingPathComponent("timeline.json")
+    }
+
     /// The directory Nymbra keeps its own files in — `config.json`'s own
     /// directory. Anything Nymbra writes for itself goes under here, so
     /// `$NYMBRA_CONFIG` moves all of it at once and a test never has to touch

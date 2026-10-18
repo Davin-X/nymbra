@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import NymbraCore
 
 /// The tab a notification is about, carried inside the notification itself.
 ///

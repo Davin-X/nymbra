@@ -270,3 +270,10 @@ extension Configuration {
             userZDOTDIR: userZDOTDIR)
     }
 }
+
+/// A stable identifier for a tab, used to track which shell a mark came from.
+public struct TabID: Equatable, Hashable, Sendable, CustomStringConvertible {
+    public let raw: Int
+    public init(_ raw: Int) { self.raw = raw }
+    public var description: String { "tab-\(raw)" }
+}

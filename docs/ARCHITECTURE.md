@@ -45,6 +45,7 @@ and only the part that needs a screen lives in the app.
 | Matching a query against the screen | `NymbraCore/Find.swift` | "Which cells does this highlight cover?" is arithmetic over the grid — and it is decided in cells rather than characters, which is a fact a window cannot tell you and a unit test can |
 | Shell marks, the generated startup files | `NymbraCore/ShellIntegration.swift` | The snippet is text with one right answer, and ADR-0009 is easier to keep than to rediscover |
 | Whether a finished command is worth announcing | `NymbraCore/CommandAttention.swift` | A rule with a right answer, and AppKit in the way of testing it |
+| Command timeline: storing and searching history | `NymbraCore/CommandTimeline.swift` | Every finished command's line, directory, status and duration — pure JSON, asserted by `--timeline-test` |
 | Application commands and shortcut parsing | `NymbraInput/Commands.swift`, `Shortcut.swift` | One list read by the menu bar *and* the settings window, so they cannot drift |
 | `CGColor` conversion, SGR → colours | `Nymbra/Theme.swift` | The only part that needs a graphics context |
 | Font resolution and metrics | `Nymbra/Fonts.swift` | CoreText, and shared by the grid and the preview so they cannot disagree |
@@ -278,6 +279,7 @@ ADR-0001.
 | Command palette | `--palette-test`, driving it with real key events: a text field's own `keyDown` never sees an arrow while the field is being edited, so the keys have to be sent the way the application sends them |
 | Find: the bar's state, its options, and the highlight under it | The matching is unit-tested on the model (`FindSuite`): the three options, word boundaries, a pattern that does not compile, a hit measured in cells so a double-width character is not highlighted at half its width, and a match that crosses a soft wrap is split into per-row segments. `--find-test` then reads the state back from the bar, presses each of the three switches through its own action, requires all eight controls to be inside the bar — Auto Layout clips too full a bar rather than complaining — and judges the highlight by pixels, off, on, off, because a highlight drawn where the text is then painted over it leaves every value in this table correct and the screen blank. It also renders the same query with the first match current and with the second current, and asserts the two pictures differ — the current match has to look like the current match, and the only way it can is if it is drawn differently from the rest |
 | Settings window: pages, gallery, recorder rules, recorder lifetime | `--settings-test` asserts rather than prints |
+| Command timeline: history with line, directory, status, duration | `--timeline-test` runs a real zsh with integration, runs three commands, and verifies entries are recorded, searchable, filterable, and have correct durations and directories |
 | Rendering | Manual, plus the find highlight's pixels in `--find-test`; a snapshot suite once Metal lands |
 
 `make check` runs everything that can run without a human.

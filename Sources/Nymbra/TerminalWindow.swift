@@ -37,6 +37,15 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
     /// they are looking at, and only the window knows which that is.
     private var unread: Set<TabID> = []
 
+    /// The command timeline for this window. Each finished command is added here
+    /// and persisted to disk. It is shared by all tabs in the window.
+    let timeline: CommandTimeline
+
+    /// Working directory per pane, keyed by (tabID, paneID). Updated when the
+    /// shell reports it via OSC 7 (not yet implemented) or when a new pane is
+    /// created. For now, the initial directory from spawn is used.
+    private var workingDirectories: [TabID: [PaneID: String]] = [:]
+
     private static let firstTab = TabID(0)
 
     /// The item in the strip that is not a tab.
@@ -76,6 +85,8 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
     init(configuration: Configuration) throws {
         self.configuration = configuration
         self.focusedTab = TerminalWindow.firstTab
+        self.timeline = CommandTimeline(fileURL: Configuration.timelineFileURL)
+        self.workingDirectories = [:]
 
         let frame = NSRect(x: 0, y: 0, width: 1000, height: 640)
         self.tabView = TabStripView(frame: frame)
@@ -676,6 +687,29 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
             subject: tab.displayName
         ) else { return }
         deliver(announcement, id)
+    }
+
+    /// Feed a shell mark to the command timeline. The mark comes from one of the
+    /// window's panes; the timeline tracks commands across all tabs.
+    func feedTimeline(mark: ShellMark, tabID: TabID, paneID: PaneID) {
+        _ = timeline.feed(mark: mark, tabID: tabID, getDirectory: { tab in
+            // The timeline uses TabID to key pending commands; we only track
+            // per pane, but the tab is the unit for the timeline's pending map.
+            // Use the focused pane's directory as the best approximation.
+            self.workingDirectories[tab]?.values.first
+        })
+    }
+
+    /// Record the working directory for a pane. Called when a new pane is created
+    /// or when the shell reports a directory change (OSC 7, not yet implemented).
+    func setWorkingDirectory(_ dir: String, for tabID: TabID, paneID: PaneID) {
+        if workingDirectories[tabID] == nil { workingDirectories[tabID] = [:] }
+        workingDirectories[tabID]?[paneID] = dir
+    }
+
+    /// Get the current working directory for a tab (uses the focused pane's dir).
+    func workingDirectory(for tabID: TabID) -> String? {
+        workingDirectories[tabID]?.values.first
     }
 
     /// Bring one of this window's tabs to the front, if it still has it.

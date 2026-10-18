@@ -125,13 +125,14 @@ of its own settings file.
 | `make screen-test` | Feed real output through the parser and dump the screen |
 | `make resize-test` | Proof that the view and the shell agree on the grid |
 | `make window-test` | Close a window, get a working shell back, and check the floor under the window |
-| `make tabs-test` | A tab strip, including tab reordering, independent switching and closing |
+| `make tabs-test` | The strip's geometry, per-tab close buttons, reordering, and independent shells |
 | `make palette-test` | The command palette, driven with real key events |
 | `make find-test` | Find options, the highlight the view actually draws, and a proof that the current match looks different from the others |
 | `make settings-test` | The settings window and the shortcut recorder's rules |
 | `make mouse-test` | Mouse reporting bytes, asserted headlessly |
 | `make shell-integration-test` | A real zsh, reporting what it is doing |
 | `make notify-test` | A long command in a background tab, announced |
+| `make timeline-test` | Command history with line, directory, exit status, duration — searchable and persisted |
 | `make check` | Everything CI runs |
 | `make clean` | Remove build output |
 
@@ -148,6 +149,7 @@ asserted in text rather than by eye:
 | `--palette-test` | The palette's rows, highlight, arrows, Return and Escape |
 | `--find-test` | The find bar's state, its three options, and the pixels of the highlight it draws |
 | `--resize-test` | The grid the view reports against the grid the shell is told |
+| `--timeline-test` | Command history with line, directory, status, duration — searchable and persisted |
 
 `make check` is the gate: it must pass before any change is considered done.
 See [CONTRIBUTING.md](CONTRIBUTING.md).

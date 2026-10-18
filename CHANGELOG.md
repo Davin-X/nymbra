@@ -188,6 +188,17 @@ window, and the tabs in the lower one end up answering to the upper one.
   visible from the outside on a machine where the system preference is already
   "only in full screen".
 
+### Added — a command timeline you can search
+
+Every command the shell runs is now recorded: the line as typed, the directory,
+the exit status, and how long it took. It is stored in a JSON file in the
+application support directory and is searchable by text or filtered by status.
+The shell marks (`OSC 133 ; C`/`D`) drive it, so no parsing of output is
+needed and it works for any command the shell knows about. The timeline is
+asserted by `--timeline-test` which runs a real zsh, runs three commands, and
+verifies the entries are correct, searchable, filterable, and have their
+durations and directories recorded.
+
 ### Added — clicking the announcement brings the tab forward
 
 The notification from the entry below says which tab it is about, and clicking it

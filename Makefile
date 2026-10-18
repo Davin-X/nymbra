@@ -22,6 +22,7 @@ help:
 	@echo "make mouse-test  - mouse reporting bytes, asserted headlessly"
 	@echo "make shell-integration-test - a real zsh, reporting what it is doing"
 	@echo "make notify-test - a long command in a background tab, announced"
+	@echo "make timeline-test - command history with exit status, duration, directory"
 	@echo "make check       - everything CI's check job runs (guard + build + tests + proofs)"
 	@echo "make clean       - remove build output"
 
@@ -131,7 +132,13 @@ shell-integration-test: build
 notify-test: build
 	"$(bin)/Nymbra" --notify-test
 
-check: architecture test pty-test screen-test resize-test window-test tabs-test palette-test find-test settings-test mouse-test shell-integration-test notify-test
+# Command timeline: every finished command recorded with its line, directory,
+# exit status and duration — searchable and persisted. Needs a real zsh with
+# shell integration.
+timeline-test: build
+	"$(bin)/Nymbra" --timeline-test
+
+check: architecture test pty-test screen-test resize-test window-test tabs-test palette-test find-test settings-test mouse-test shell-integration-test notify-test timeline-test
 
 clean:
 	swift package clean

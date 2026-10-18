@@ -277,7 +277,9 @@ Nymbra loads the integration itself instead of adding a line to your dotfiles.
   click that brings the tab forward — including while Nymbra is the application in
   front, which the system suppresses by default and which is the case that matters
 - **Command timeline**: searchable history of every command, its exit status,
-  duration and directory, stored locally
+  duration and directory, stored locally — **done**: `--timeline-test` runs a real
+  zsh, records three commands, and verifies entries are stored, searchable by
+  text, filterable by status, with correct durations and directories
 - A quiet **"what needs you"** digest — three things, not a firehose
 
 **Acceptance:** run a 60-second build in a background tab; the tab badges, a
@@ -346,7 +348,7 @@ Priority: **P0** required for v0.1 · **P1** v0.1 if cheap · **P2** later.
 | Exit-status indicators in the gutter | P0 | M4 |
 | Background-tab unread badge | P0 | M4 |
 | Long-command notifications | P1 | M4 |
-| Command timeline (local, searchable) | P1 | M4 |
+| Command timeline (local, searchable) | P1 | M4 ✅ |
 | "What needs you" digest | P2 | M4 |
 | Jump to previous/next prompt | P1 | M1 (data) / M4 (UX) |
 

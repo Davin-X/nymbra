@@ -262,6 +262,24 @@ jobs:
             || { echo "::error::a long command was not announced as it should be"; exit 1; }
           echo "Notification passed"
 
+      # Command timeline: every finished command recorded with line, directory,
+      # exit status and duration — searchable and persisted. Needs a real zsh.
+      - name: Command timeline
+        run: |
+          .build/release/Nymbra --timeline-test > timeline.out 2> timeline.err &
+          pid=$!
+          for _ in $(seq 1 45); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            echo "::error::--timeline-test did not finish"
+          fi
+          wait "$pid" 2>/dev/null || true
+          cat timeline.err >&2 || true
+          cat timeline.out
+          grep -q "recorded=3 succeeded=1 failed=1 duration=1 search=1 filter=1 dir=1" timeline.out \
+            || { echo "::error::command timeline did not record correctly"; exit 1; }
+          echo "Timeline passed"
+
       - name: Docs present
         run: |
           for f in README.md LICENSE CONTRIBUTING.md CHANGELOG.md \
