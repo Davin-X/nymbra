@@ -114,7 +114,7 @@ the parser, and CI asserts the result without a window.
 
 **Non-goals:** ligatures, image protocols, Kitty keyboard protocol.
 
-### M1.x — Tabs and splits 🔨 *in progress*
+### M1.x — Tabs and splits ✅
 
 A terminal with one pane is a toy. Broken out of M1 deliberately, so that the
 emulation core could be finished and verified first — and now the natural next
@@ -139,11 +139,20 @@ test earning its keep before the feature it was written for even exists: the
 shells that look correct cannot answer the question, and the witness that can is
 `/bin/sleep`, which never touches its terminal.
 
-**Still to do**
+**Delivered**
 - Tabs, with the unread badge M4 will fill in
 - Horizontal and vertical splits, resizable
 - Focus follows a click; keyboard navigation between panes
 - Each pane owns an independent `Terminal`; the view draws the focused model
+- A controlling terminal for every shell (ADR-0008), so Ctrl+C, Ctrl+Z and job
+  control work in every tab and every pane
+- Text reflow on resize: a line the terminal wrapped is joined or split as the
+  width demands, rather than being cut off
+
+**Owed — tracked here rather than quietly dropped**
+- The unread badge on a tab (M4 fills it in)
+- Native `NSWindow` tabbing (`addTabbedWindow`) remains the fallback if the
+  in-window strip ever stops feeling right
 
 **Acceptance:** four panes, each running a different program, resized and closed
 independently, with no shared mutable state between them.
@@ -219,7 +228,7 @@ both can print themselves (`--menu-test`, `--theme-test`) for CI to read.
 See [ADR-0006](adr/0006-configuration-as-a-validated-json-file.md) for why the
 file is JSON, why loading can never fail, and why the model is UI-free.
 
-### M3 — Metal renderer, reflow, mouse 🔜
+### M3 — Metal renderer, reflow, mouse ⏳ *in progress*
 
 **Scope**
 - Glyph atlas rasterised once per (font, size, style) via CoreText
@@ -230,10 +239,10 @@ file is JSON, why loading can never fail, and why the model is UI-free.
   M2; this milestone draws and renders them at speed)
 - **Search in scrollback** — carried forward, since it needs the damage-tracked
   renderer to show matches without redrawing everything
-- **Text reflow on resize** — carried over from M1, which preserves content but
-  does not rewrap
-- **Mouse reporting bytes** for the modes already tracked (1000/1002/1003,
-  x10 and SGR encodings)
+- **Text reflow on resize** — ✅ done: a line the terminal wrapped is joined or
+  split as the width demands, rather than being cut off
+- **Mouse reporting bytes** — ✅ done: the modes are tracked and the bytes go out
+  (1000/1002/1003, x10 and SGR encodings)
 
 **Acceptance:** a full-screen `yes` flood stays at frame rate with flat memory;
 CoreText drawing is removed, and `TermView` is a pure function of the model.
@@ -305,7 +314,8 @@ Priority: **P0** required for v0.1 · **P1** v0.1 if cheap · **P2** later.
 | Scroll region and DECAWM | P0 | M1 |
 | Resize with content preservation | P0 | M1 |
 | Bracketed paste | P0 | M1 |
-| Mouse reporting | P1 | M1 |
+| Mouse reporting | ✅ | M3 |
+| Text reflow on resize | ✅ | M3 |
 | Ligatures | P2 | M3 |
 | Image protocols (sixel / Kitty) | 💭 | — |
 | Kitty keyboard protocol | 💭 | — |
