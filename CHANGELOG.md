@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `make check` could never pass
+
+`make check` ran `swiftlint lint --strict` as its first step. But the CI job that
+ran SwiftLint was removed a while ago and `.swiftlint.yml` was deleted with it;
+the step was left behind. It fails for two different reasons, neither of them a
+statement about this code: with no config, a strict lint fails on a codebase that
+never adopted the default rules, and under Command Line Tools alone `swiftlint`
+aborts before linting anything at all
+(`Loading sourcekitdInProc.framework … failed`). So `make check` was red on a
+machine where nothing was wrong — including the CLT-only machines the README
+promises Nymbra builds on, and the pull-request template asks everyone to tick
+"`make check` passes locally".
+
+- `lint` is no longer a prerequisite of `check`. It stays as a convenience that
+  skips itself, with a word, when `swiftlint` is not installed.
+- `check` now runs the architecture guard that CI runs first — which `make help`
+  already claimed it did ("everything CI runs") and it did not.
+
 ### Added — the unread tab badge
 
 A tab that prints while it is not the one in front now marks itself: a dot on its
