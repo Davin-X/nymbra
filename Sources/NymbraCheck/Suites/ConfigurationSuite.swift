@@ -14,6 +14,8 @@ func configurationSuite(_ h: Harness) {
     h.equal(defaults.behaviour.cursorBlinks, true, "the cursor blinks by default")
     h.equal(defaults.behaviour.confirmBeforeClosingRunningSession, true,
             "closing a session that is still running is confirmed by default")
+    h.equal(defaults.behaviour.shellIntegration, false,
+            "shell integration is off until it is asked for")
     h.equal(defaults.colours.preset, .dark, "the default preset is dark")
     h.equal(defaults.appearance.fontSize, 13, "the default font size is 13pt")
     h.equal(defaults.appearance.fontFamily, "Menlo", "the default font is Menlo")
@@ -41,6 +43,7 @@ func configurationSuite(_ h: Harness) {
     edited.behaviour.cursorShape = .bar
     edited.behaviour.cursorBlinks = false
     edited.behaviour.scrollbackLines = 500
+    edited.behaviour.shellIntegration = true
     edited.shell.path = "/bin/dash"
 
     let saved = tempURL()
@@ -154,6 +157,45 @@ func configurationSuite(_ h: Harness) {
         h.equal(result.warnings.count, 1, "a rejected shortcut is reported")
     }
 
+    // MARK: Shell integration
+
+    // The setting is the only thing standing between a user and a rearranged
+    // shell startup, so both halves are checked: that "off" writes nothing at
+    // all, and that "on" writes every file zsh asks for by name — a file left
+    // out is one of the user's own that would never run.
+    let support = tempDirectory()
+    let generated = support.appendingPathComponent("shell")
+    defer { try? FileManager.default.removeItem(at: support) }
+
+    h.expect(Configuration().shellIntegration(in: support, userZDOTDIR: "/tmp/user") == nil,
+             "with the setting off there is no integration to start a shell with")
+    h.expect(!FileManager.default.fileExists(atPath: generated.path),
+             "and nothing is written for it")
+
+    var wanting = Configuration()
+    wanting.behaviour.shellIntegration = true
+    let integration = wanting.shellIntegration(in: support, userZDOTDIR: "/tmp/user")
+    h.expect(integration != nil, "with the setting on, an integration comes back")
+    h.equal(integration?.environment["ZDOTDIR"] ?? "", generated.path,
+            "the shell is pointed at Nymbra's own directory")
+    h.equal(integration?.environment["NYMBRA_USER_ZDOTDIR"] ?? "", "/tmp/user",
+            "and told where the real startup files are, so they still run")
+
+    for name in ShellIntegration.startupFiles + ["nymbra.zsh"] {
+        h.expect(FileManager.default.fileExists(atPath: generated.appendingPathComponent(name).path),
+                 "\(name) is generated, so zsh reads ours and the user's own is not skipped")
+    }
+
+    let zshrc = (try? String(contentsOf: generated.appendingPathComponent(".zshrc"),
+                             encoding: .utf8)) ?? ""
+    // `NYMBRA_USER_ZDOTDIR` rather than the literal path: which directory the
+    // user's own startup lives in is settled in the shell, at the moment, not
+    // here — and the check above pins what it is set to.
+    h.expect(zshrc.contains("NYMBRA_USER_ZDOTDIR") && zshrc.contains("/.zshrc"),
+             "the generated .zshrc loads the user's own .zshrc, wherever it is")
+    h.expect(zshrc.contains("${ZDOTDIR}/nymbra.zsh"),
+             "and then the snippet, which is the only part that sends a mark")
+
     // MARK: Hostile input
 
     // Every one of these must leave the app able to start, and leave a
@@ -186,6 +228,13 @@ func configurationSuite(_ h: Harness) {
 private func tempURL() -> URL {
     FileManager.default.temporaryDirectory
         .appendingPathComponent("nymbra-\(UUID().uuidString).json")
+}
+
+/// A path that does not exist yet, for things that write a directory of their
+/// own rather than a single file.
+private func tempDirectory() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("nymbra-\(UUID().uuidString)")
 }
 
 /// Write a configuration file, load it through the real path, and remove it.

@@ -545,7 +545,17 @@ func runShellIntegrationTest() -> Bool {
             to: userZDOTDIR.appendingPathComponent(".zshrc"),
             atomically: true, encoding: .utf8)
 
-        let integration = try ShellIntegration.zsh(in: generated, userZDOTDIR: userZDOTDIR.path)
+        // Asked for the way the app asks for it, rather than assembled here, so
+        // that the setting and the writing of the files are covered too and not
+        // merely the parser on the other end of them.
+        var configuration = Configuration()
+        configuration.behaviour.shellIntegration = true
+        guard let integration = configuration.shellIntegration(
+            in: generated, userZDOTDIR: userZDOTDIR.path
+        ) else {
+            print("shell-integration-test\tthe setting was on and the integration was not written")
+            return false
+        }
 
         let queue = DispatchQueue(label: "dev.nymbra.shell-integration-test")
         let terminal = try Terminal(size: GridSize(rows: 24, cols: 80),
