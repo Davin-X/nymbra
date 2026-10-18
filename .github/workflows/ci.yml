@@ -195,6 +195,8 @@ jobs:
             || { echo "::error::the find query did not follow the focused pane"; exit 1; }
           grep -q "leftBehind=0" find.out \
             || { echo "::error::the find highlight was not cleared again"; exit 1; }
+          grep -q "current=1" find.out \
+            || { echo "::error::the current match does not look different from the others"; exit 1; }
           painted=$(sed -n 's/.*highlight=\([0-9]*\).*/\1/p' find.out | head -1)
           if [ "${painted:-0}" -lt 1000 ]; then
             echo "::error::the find highlight drew nothing (highlight=${painted:-0} bytes)"

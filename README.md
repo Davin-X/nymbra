@@ -127,7 +127,7 @@ of its own settings file.
 | `make window-test` | Close a window, get a working shell back, and check the floor under the window |
 | `make tabs-test` | A tab strip, including tab reordering, independent switching and closing |
 | `make palette-test` | The command palette, driven with real key events |
-| `make find-test` | Find options, and the highlight the view actually draws |
+| `make find-test` | Find options, the highlight the view actually draws, and a proof that the current match looks different from the others |
 | `make settings-test` | The settings window and the shortcut recorder's rules |
 | `make mouse-test` | Mouse reporting bytes, asserted headlessly |
 | `make shell-integration-test` | A real zsh, reporting what it is doing |
