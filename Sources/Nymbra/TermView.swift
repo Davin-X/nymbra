@@ -422,8 +422,8 @@ final class TermView: NSView {
             let viewportRow = match.row - screen.viewportFirstRow(scrollOffset: scrollOffset)
             guard viewportRow >= 0, viewportRow < screen.rows else { continue }
 
-            let origin = cellOrigin(col: match.col, row: viewportRow)
-            let matchWidth = CGFloat(match.len) * cellWidth
+            let origin = cellOrigin(col: match.column, row: viewportRow)
+            let matchWidth = CGFloat(match.columns) * cellWidth
 
             // Current match gets a different color
             if index == state.currentIndex {
@@ -778,27 +778,32 @@ final class TermView: NSView {
     /// State for the find overlay.
     private struct FindState {
         var query: String = ""
-        var matches: [(row: Int, col: Int, len: Int)] = []
+        var options = FindOptions.standard
+        var matches: [FindMatch] = []
         var currentIndex: Int = -1
+        /// The query was a regular expression that did not compile. Kept apart
+        /// from "no matches", because they are two different things to be told.
+        var invalidPattern = false
     }
 
     private var findState: FindState?
     var findHasMatches: Bool { findState?.matches.isEmpty == false }
     var findStatus: String {
         guard let state = findState, !state.query.isEmpty else { return "0 matches" }
+        if state.invalidPattern { return "Invalid regex" }
         guard !state.matches.isEmpty else { return "No matches" }
         return "\(state.currentIndex + 1) of \(state.matches.count)"
     }
 
     /// Open the find overlay with the given query (empty to start fresh).
-    func startFind(query: String = "") {
-        findState = FindState(query: query)
+    func startFind(query: String = "", options: FindOptions = .standard) {
+        findState = FindState(query: query, options: options)
         findAll()
         needsDisplay = true
     }
 
-    func updateFind(query: String) {
-        startFind(query: query)
+    func updateFind(query: String, options: FindOptions) {
+        startFind(query: query, options: options)
     }
 
     func endFind() {
@@ -821,50 +826,27 @@ final class TermView: NSView {
     }
 
     private func findAll() {
-        var state = findState!
-        let query = state.query.lowercased()
-        guard !query.isEmpty else {
+        guard var state = findState else { return }
+        // The matching itself is the model's, so it is asserted there: what this
+        // method owns is turning a result into what the overlay draws and which
+        // match is current.
+        switch Find.matches(in: screen, query: state.query, options: state.options) {
+        case .invalidPattern:
             state.matches = []
+            state.invalidPattern = true
             state.currentIndex = -1
-            findState = state
-            return
+        case .matches(let matches):
+            state.matches = matches
+            state.invalidPattern = false
+            state.currentIndex = matches.isEmpty ? -1 : 0
         }
-        var matches: [(row: Int, col: Int, len: Int)] = []
-
-        // Search in scrollback
-        for (rowIndex, rowCells) in screen.scrollback.enumerated() {
-            let text = Screen.text(ofLine: rowCells).lowercased()
-            var searchStart = text.startIndex
-            while let range = text[searchStart...].range(of: query) {
-                let col = text.distance(from: text.startIndex, to: range.lowerBound)
-                let len = query.count
-                matches.append((row: rowIndex, col: col, len: len))
-                searchStart = range.upperBound
-            }
-        }
-
-        // Search in live screen
-        for row in 0..<screen.rows {
-            let text = screen.rowText(row).lowercased()
-            var searchStart = text.startIndex
-            while let range = text[searchStart...].range(of: query) {
-                let col = text.distance(from: text.startIndex, to: range.lowerBound)
-                let len = query.count
-                let absoluteRow = screen.scrollback.count + row
-                matches.append((row: absoluteRow, col: col, len: len))
-                searchStart = range.upperBound
-            }
-        }
-
-        state.matches = matches
-        state.currentIndex = matches.isEmpty ? -1 : 0
         findState = state
-        if !matches.isEmpty {
-            scrollToMatch(matches[0])
+        if state.currentIndex >= 0 {
+            scrollToMatch(state.matches[state.currentIndex])
         }
     }
 
-    private func scrollToMatch(_ match: (row: Int, col: Int, len: Int)) {
+    private func scrollToMatch(_ match: FindMatch) {
         let targetRow = match.row
         // Scroll so the match is in the middle of the viewport if possible.
         let offset = max(0, targetRow - screen.rows / 2)

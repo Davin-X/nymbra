@@ -17,6 +17,9 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
     private let contentView = NSView()
     private let findBar = NSVisualEffectView()
     private let findSearchField = NSSearchField()
+    private let findCaseButton = NSButton()
+    private let findWordButton = NSButton()
+    private let findRegexButton = NSButton()
     private let findCountLabel = NSTextField(labelWithString: "0 matches")
     private let findPreviousButton = NSButton()
     private let findNextButton = NSButton()
@@ -264,7 +267,7 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
 
     func beginFind() {
         findBar.isHidden = false
-        focusedView?.startFind(query: findSearchField.stringValue)
+        focusedView?.startFind(query: findSearchField.stringValue, options: findOptions)
         window.makeFirstResponder(findSearchField)
         findSearchField.selectText(nil)
         updateFindCount()
@@ -279,7 +282,7 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
 
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSSearchField, field === findSearchField else { return }
-        focusedView?.updateFind(query: field.stringValue)
+        focusedView?.updateFind(query: field.stringValue, options: findOptions)
         updateFindCount()
     }
 
@@ -334,9 +337,68 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
     /// The query the bar is holding.
     var findQuery: String { findSearchField.stringValue }
 
+    /// The three switches, as the bar shows them.
+    var findOptionSummary: String {
+        "case=\(findCaseButton.state == .on ? 1 : 0) "
+            + "word=\(findWordButton.state == .on ? 1 : 0) "
+            + "regex=\(findRegexButton.state == .on ? 1 : 0)"
+    }
+
+    /// The bar's own bounds, and where each of its controls sits inside them — all
+    /// in the bar's coordinates. A control laid out past the edge of the bar is a
+    /// control nobody can use, and Auto Layout clips it rather than complaining.
+    var findBarBounds: NSRect { findBar.bounds }
+
+    var findControlFrames: [NSRect] {
+        [findSearchField, findCaseButton, findWordButton, findRegexButton,
+         findCountLabel, findPreviousButton, findNextButton, findCloseButton].map { view in
+            view.superview.map { $0.convert(view.frame, to: findBar) } ?? view.frame
+        }
+    }
+
+    /// Which switch a proof wants to press.
+    enum FindToggle {
+        case matchCase, wholeWord, regex
+    }
+
+    /// Press a switch the way a click does — through the button's own action, so a
+    /// switch that is not wired is a switch that never moves.
+    func clickFindToggle(_ toggle: FindToggle) {
+        switch toggle {
+        case .matchCase: findCaseButton.performClick(nil)
+        case .wholeWord: findWordButton.performClick(nil)
+        case .regex: findRegexButton.performClick(nil)
+        }
+    }
+
+    /// Put a query in the bar and search for it — what typing does, without the
+    /// keystrokes. The keystroke path has its own proof, in the same test.
+    func search(_ query: String) {
+        findSearchField.stringValue = query
+        focusedView?.updateFind(query: query, options: findOptions)
+        updateFindCount()
+    }
+
     private func synchronizeFindWithFocus() {
         guard !findBar.isHidden else { return }
-        focusedView?.startFind(query: findSearchField.stringValue)
+        focusedView?.startFind(query: findSearchField.stringValue, options: findOptions)
+        updateFindCount()
+    }
+
+    /// What the three switches say the search should be.
+    ///
+    /// Read from the buttons rather than kept beside them: two copies of "is match
+    /// case on" is two answers, and the one the person can see has to be the one
+    /// that is used.
+    private var findOptions: FindOptions {
+        FindOptions(matchCase: findCaseButton.state == .on,
+                    wholeWord: findWordButton.state == .on,
+                    regex: findRegexButton.state == .on)
+    }
+
+    /// A switch moved: re-run the search with it, and with the query as it stands.
+    private func applyFindOptions() {
+        focusedView?.updateFind(query: findSearchField.stringValue, options: findOptions)
         updateFindCount()
     }
 
@@ -369,8 +431,19 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
         configureFindButton(findCloseButton, symbol: "xmark",
                             label: "Close search", action: #selector(findCloseClicked(_:)))
 
+        // Three switches, in the order the concept puts them and the order the
+        // question is asked in: how the text is compared, then what counts as a
+        // boundary, then how the query is read.
+        configureFindToggle(findCaseButton, title: "Aa", label: "Match case",
+                            action: #selector(findCaseClicked(_:)))
+        configureFindToggle(findWordButton, title: "W", label: "Match whole word",
+                            action: #selector(findWordClicked(_:)))
+        configureFindToggle(findRegexButton, title: ".*", label: "Use regular expression",
+                            action: #selector(findRegexClicked(_:)))
+
         let controls = NSStackView(views: [
-            findSearchField, findCountLabel, findPreviousButton, findNextButton, findCloseButton,
+            findSearchField, findCaseButton, findWordButton, findRegexButton,
+            findCountLabel, findPreviousButton, findNextButton, findCloseButton,
         ])
         controls.orientation = .horizontal
         controls.alignment = .centerY
@@ -378,24 +451,43 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
         controls.translatesAutoresizingMaskIntoConstraints = false
         findBar.addSubview(controls)
         contentView.addSubview(findBar)
-        let preferredWidth = findBar.widthAnchor.constraint(equalToConstant: 420)
+        let preferredWidth = findBar.widthAnchor.constraint(equalToConstant: 470)
         preferredWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
             findBar.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 38),
             findBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             preferredWidth,
-            findBar.widthAnchor.constraint(lessThanOrEqualToConstant: 440),
-            findBar.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
+            findBar.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
+            findBar.widthAnchor.constraint(greaterThanOrEqualToConstant: 380),
             findBar.heightAnchor.constraint(equalToConstant: 44),
             controls.leadingAnchor.constraint(equalTo: findBar.leadingAnchor, constant: 7),
             controls.trailingAnchor.constraint(equalTo: findBar.trailingAnchor, constant: -7),
             controls.topAnchor.constraint(equalTo: findBar.topAnchor, constant: 6),
             controls.bottomAnchor.constraint(equalTo: findBar.bottomAnchor, constant: -6),
             findSearchField.heightAnchor.constraint(equalToConstant: 28),
+            findCaseButton.widthAnchor.constraint(equalToConstant: 34),
+            findWordButton.widthAnchor.constraint(equalToConstant: 30),
+            findRegexButton.widthAnchor.constraint(equalToConstant: 34),
             findPreviousButton.widthAnchor.constraint(equalToConstant: 27),
             findNextButton.widthAnchor.constraint(equalToConstant: 27),
             findCloseButton.widthAnchor.constraint(equalToConstant: 27),
         ])
+    }
+
+    /// One of the bar's switches. A switch that is on stays in: `pushOnPushOff`
+    /// is what makes the state the person can see the same state the search uses.
+    private func configureFindToggle(_ button: NSButton, title: String,
+                                     label: String, action: Selector) {
+        button.title = title
+        button.bezelStyle = .rounded
+        button.setButtonType(.pushOnPushOff)
+        button.state = .off
+        button.target = self
+        button.action = action
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+        button.refusesFirstResponder = true
+        button.translatesAutoresizingMaskIntoConstraints = false
     }
 
     private func configureFindButton(_ button: NSButton, symbol: String,
@@ -423,6 +515,18 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTabViewDelegate, NSTex
 
     @objc private func findCloseClicked(_ sender: NSButton) {
         cancelFind()
+    }
+
+    @objc private func findCaseClicked(_ sender: NSButton) {
+        applyFindOptions()
+    }
+
+    @objc private func findWordClicked(_ sender: NSButton) {
+        applyFindOptions()
+    }
+
+    @objc private func findRegexClicked(_ sender: NSButton) {
+        applyFindOptions()
     }
 
     /// Bring a tab to the front.

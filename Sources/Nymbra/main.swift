@@ -349,6 +349,57 @@ func runFindTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     press(20, "NYMBRA_FIND4")
     let reopened = window.findBarIsVisible && window.findStatusText == "1 of 2"
 
+    // The three switches. Each is pressed through its own action, so a switch that
+    // is not wired is a switch that never moves — which is why the read-back of the
+    // buttons is part of the assertion rather than a convenience.
+    // The bar is a stack of eight controls squeezed into a fixed width, and Auto
+    // Layout clips an over-full row rather than complaining: something would simply
+    // be missing. So the switches and the count have to be *inside* the bar, which
+    // is a thing a proof can check and a person would only notice by looking.
+    window.window.contentView?.layoutSubtreeIfNeeded()
+    let bar = window.findBarBounds
+    let controls = window.findControlFrames
+    let controlsInside = controls.count == 8
+        && controls.allSatisfy { bar.contains($0) && $0.width > 10 && $0.height > 10 }
+
+    window.search("nymbra_find4")
+    let insensitive = window.findStatusText == "1 of 2"
+
+    // Match case: the same query, and the same click, now finds nothing — which is
+    // also what says the click re-ran the search without the query being retyped.
+    window.clickFindToggle(.matchCase)
+    let caseSensitive = window.findOptionSummary == "case=1 word=0 regex=0"
+        && window.findStatusText == "No matches"
+    window.search("NYMBRA_FIND4")
+    let caseTyped = window.findStatusText == "1 of 2"
+
+    // Whole word: `NYMBRA_FIND4` runs into the digits that follow it, so it is not a
+    // word; `NYMBRA_FIND42` is.
+    window.clickFindToggle(.wholeWord)
+    let wordRejects = window.findStatusText == "No matches"
+    window.search("NYMBRA_FIND42")
+    let wordAccepts = window.findStatusText == "1 of 1"
+
+    // Regex: what the literal query could not say.
+    window.clickFindToggle(.regex)
+    window.search("NYMBRA_FIND[0-9]+")
+    let regexFinds = window.findOptionSummary == "case=1 word=1 regex=1"
+        && window.findStatusText == "1 of 2"
+
+    // A pattern that does not compile says so, and highlights nothing: an empty
+    // screen and a broken query are different things to be told.
+    window.search("NYMBRA_FIND[")
+    let invalidReported = window.findStatusText == "Invalid regex"
+        && window.focusedView?.findHasMatches == false
+
+    // Back to the loose default, and the bar finds again.
+    window.clickFindToggle(.matchCase)
+    window.clickFindToggle(.wholeWord)
+    window.clickFindToggle(.regex)
+    window.search("NYMBRA_FIND4")
+    let backToDefault = window.findOptionSummary == "case=0 word=0 regex=0"
+        && window.findStatusText == "1 of 2"
+
     // The query belongs to the pane in front, so a new tab starts its own search
     // rather than keeping the highlight of a tab nobody is looking at.
     let firstTab = window.focusedTab
@@ -385,13 +436,22 @@ func runFindTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     window.closeFocusedTab()
     window.selectTab(firstTab)
 
-    let ok = printed && barOpened && typed && counted && nextWalked && previousWalked && escaped
-        && reopened && followedTab && followedBack && highlighted >= 1000 && leftBehind == 0
-    print("find-test\tprinted=\(flag(printed)) bar=\(flag(barOpened)) typed=\(flag(typed)) "
-          + "count=\(flag(counted)) next=\(flag(nextWalked)) previous=\(flag(previousWalked)) "
-          + "escape=\(flag(escaped)) reopened=\(flag(reopened)) "
-          + "follow=\(flag(followedTab && followedBack)) highlight=\(highlighted) "
-          + "leftBehind=\(leftBehind)")
+    let behaviour = printed && barOpened && typed && counted && nextWalked && previousWalked
+        && escaped && reopened
+    let options = insensitive && caseSensitive && caseTyped && wordRejects && wordAccepts
+        && regexFinds && invalidReported && backToDefault
+    let following = followedTab && followedBack
+    let ok = behaviour && options && following && controlsInside
+        && highlighted >= 1000 && leftBehind == 0
+    let state = "printed=\(flag(printed)) bar=\(flag(barOpened)) typed=\(flag(typed)) "
+        + "count=\(flag(counted)) next=\(flag(nextWalked)) previous=\(flag(previousWalked)) "
+        + "escape=\(flag(escaped)) reopened=\(flag(reopened))"
+    let optionFlags = "insensitive=\(flag(insensitive)) case=\(flag(caseSensitive && caseTyped)) "
+        + "word=\(flag(wordRejects && wordAccepts)) regex=\(flag(regexFinds)) "
+        + "invalid=\(flag(invalidReported)) reset=\(flag(backToDefault))"
+    let drawn = "controls=\(flag(controlsInside)) follow=\(flag(following)) "
+        + "highlight=\(highlighted) leftBehind=\(leftBehind)"
+    print("find-test\t" + state + " " + optionFlags + " " + drawn)
     return ok
 }
 

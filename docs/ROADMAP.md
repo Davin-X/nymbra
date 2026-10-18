@@ -56,7 +56,7 @@ visible rather than discovered later.
 |---|---|---|
 | Copy/paste | ✅ selection (click, word, line, drag), Cmd+C and Cmd+V with bracketed paste | — |
 | Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen | — |
-| Search in scrollback | ✅ a find bar (`⌘F`) over the terminal — query, match count, `↑` `↓`, `×` — with next/previous, the query following the focused tab, and matches highlighted both in the live screen and in history; asserted by the pixels the view draws (`--find-test`), because a highlight nobody can see is invisible to every other kind of test | M3 |
+| Search in scrollback | ✅ a find bar (`⌘F`) over the terminal — query, match count, match case, whole word, regular expression, `↑` `↓`, `×` — with next/previous, `Invalid regex` reported rather than passed off as no matches, the query following the focused tab, and matches highlighted both in the live screen and in history; the matching is the model's and is asserted there (`FindSuite`: the three options, word boundaries, patterns that do not compile, and cells rather than characters), while the highlight is asserted by the pixels the view draws (`--find-test`), because a highlight nobody can see is invisible to every other kind of test. A match broken across a soft wrap is not found yet: the matcher reads one row at a time | M3 |
 | Tabs and split panes | ✅ tabs can be reordered; right-click offers tab actions | M1.x (P0) |
 | Text reflow on resize | ✅ live screen and history rewrap on resize; soft-wrapped rows are rejoined and rewrapped | — |
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
@@ -235,8 +235,10 @@ file is JSON, why loading can never fail, and why the model is UI-free.
   half on one row.
 - **Mouse reporting** for the modes already tracked — 1000/1002/1003, in the X10
   and SGR encodings.
-- **Search in scrollback** — a find overlay, next/previous, matches highlighted
-  in history and on the live screen.
+- **Search in scrollback** — a find overlay with match case, whole word and
+  regular expression, next/previous, matches highlighted in history and on the
+  live screen. A hit is measured in cells, not characters, so a double-width
+  character is highlighted at the width it is drawn.
 
 **Remaining**
 - Glyph atlas rasterised once per (font, size, style) via CoreText
@@ -420,3 +422,4 @@ it is probably out of scope.
 | Do we bundle a Nerd Font, or use the user's? | A native app can resolve user fonts via CoreText, so bundling may be unnecessary |
 | Do we read Ghostty-style config? | Familiarity versus taking on someone else's format. Our own documented JSON is the answer for M2; revisit once it is stable |
 | Scrollback in memory or on disk? | On disk unlocks M5 restore at the cost of complexity |
+| Should find match across a soft wrap? | The model rejoins soft-wrapped rows for reflow, so the text is there to be matched, but a hit would have to be reported as more than one cell span — one per row — and the highlight drawn per segment. Today a match broken by the wrap is not found, and that is the whole of the gap |

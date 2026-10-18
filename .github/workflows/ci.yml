@@ -170,7 +170,9 @@ jobs:
       # Find, including the highlight, which is judged by the pixels the view
       # draws. A highlight painted where the terminal's rows then paint over it
       # leaves every other assertion in this file correct and the screen blank —
-      # which is exactly what a screenful-off row calculation did.
+      # which is exactly what a screenful-off row calculation did. The three
+      # options are pressed through their own buttons for the same reason: a
+      # switch that is not wired is a switch that never moves.
       - name: Find bar and its highlight
         run: |
           .build/release/Nymbra --find-test > find.out 2> find.err &
@@ -183,8 +185,14 @@ jobs:
           wait "$pid" 2>/dev/null || true
           cat find.err >&2 || true
           cat find.out
-          grep -q "printed=1 bar=1 typed=1 count=1 next=1 previous=1 escape=1 reopened=1 follow=1" find.out \
+          grep -q "printed=1 bar=1 typed=1 count=1 next=1 previous=1 escape=1 reopened=1" find.out \
             || { echo "::error::the find bar did not behave"; exit 1; }
+          grep -q "insensitive=1 case=1 word=1 regex=1 invalid=1 reset=1" find.out \
+            || { echo "::error::a find option did not do what it says"; exit 1; }
+          grep -q "controls=1" find.out \
+            || { echo "::error::a control in the find bar is not on screen"; exit 1; }
+          grep -q "follow=1" find.out \
+            || { echo "::error::the find query did not follow the focused pane"; exit 1; }
           grep -q "leftBehind=0" find.out \
             || { echo "::error::the find highlight was not cleared again"; exit 1; }
           painted=$(sed -n 's/.*highlight=\([0-9]*\).*/\1/p' find.out | head -1)

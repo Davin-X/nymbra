@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed — the palette threw, and find highlighted nothing
+### Fixed — the palette threw, and find mis-measured what it found
 
 - **The command palette crashed the application the first time it was opened.**
   Each row's width was constrained to the list *before* the row had joined it, and
@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content size. `--window-test` shows the view exactly that size and requires a
   grid of at least 30×10, because a shell told it has one column wraps every line
   it prints into a strip one character wide.
+- **A match containing a double-width character was highlighted at half its width.**
+  A match was measured in characters and drawn in cells, and those are the same
+  number only while every character is one cell wide. On a row with CJK in it the
+  highlight covered the first half of the text it had found, and everything after
+  the match was addressed a cell off. Matching now lives in the model, and reports
+  a hit as a row, a start cell and a **cell** count: `日本語` is six cells, not
+  three. Foundation's matchers answer in UTF-16 units, so the model keeps the
+  translation back to cells and uses it for both the literal and the pattern path.
+  `FindSuite` asserts the arithmetic exactly; `--find-test` still judges the
+  drawn pixels.
 
 ### Added — a command palette, recorded shortcuts and a useful tab strip
 
@@ -43,6 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Find** is a bar over the terminal — query, match count, `↑` `↓`, `×` — opened
   by `⌘F` and gone on Escape. The query belongs to the pane in front, so switching
   tabs switches searches with it, and next/previous keep their commands.
+- **Find options**: three switches beside the query — `Aa` match case, `W` match
+  whole word, `.*` regular expression. Each is a button in its own on state, which
+  is also the state the search is run with, and moving one re-runs the search
+  without the query being retyped. A pattern that does not compile says
+  `Invalid regex` rather than "no matches": mistyping a bracket is not the same
+  answer as a word that is not on screen. Whole word means what a shell means by
+  `\b` — letter, digit or underscore. The matching is `NymbraCore.Find`, so the
+  boundaries and the cell arithmetic are asserted without a window, and the
+  switches themselves are pressed through their own actions in `--find-test`,
+  where a switch that is not wired is a switch that never moves. That proof also
+  requires each of the bar's eight controls to be inside the bar: Auto Layout
+  clips a bar that is too full rather than complaining, and a switch clipped off
+  the edge is a switch nobody can press.
 - Settings now follow the concept's page order: Appearance, Keyboard, Shell,
   Behaviour and Advanced. The Appearance page groups preview, fonts and theme
   presets; Advanced contains colour overrides and configuration access. Keyboard
@@ -57,7 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a query, the shortcut label on each, the row that is highlighted, `↑`/`↓` moving
   the highlight, Return running the highlighted row, and Escape closing it.
 - `--find-test` does the same for the find bar against a live shell — type, count,
-  next, previous, Escape, reopening, and following the focus between tabs — and
+  next, previous, Escape, reopening, each of the three options and the answer an
+  uncompilable pattern gets, and following the focus between tabs — and
   then judges the *highlight* by pixels: find off, find on, find off. The third
   render has to be byte-identical to the first, so the highlight is proven drawn
   and proven cleared rather than believed.
