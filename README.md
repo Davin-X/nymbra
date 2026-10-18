@@ -25,8 +25,7 @@ $ otool -L .build/release/Nymbra
 > preview, eight palettes, and select-and-copy. So are windows: **⌘N** opens
 > another with its own shell, and closing one is not a dead end.
 >
-> It is not yet a daily driver. Missing: search, mouse reporting
-> (the modes are tracked, but no bytes are sent yet), and the Metal renderer
+> It is not yet a daily driver. Missing: search, and the Metal renderer
 > that will replace CoreText drawing.
 >
 > See [docs/ROADMAP.md](docs/ROADMAP.md) for what is planned and
@@ -125,6 +124,7 @@ of its own settings file.
 | `make resize-test` | Proof that the view and the shell agree on the grid |
 | `make window-test` | Close a window and get a working shell back |
 | `make tabs-test` | A tab strip, tabs made, switched and closed independently |
+| `make mouse-test` | Mouse reporting bytes, asserted headlessly |
 | `make check` | Everything CI runs |
 | `make clean` | Remove build output |
 

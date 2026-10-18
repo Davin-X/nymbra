@@ -64,6 +64,53 @@ public final class Screen {
     public enum MouseMode: Equatable { case off, click, drag, motion }
     public enum MouseEncoding: Equatable { case x10, sgr }
 
+    /// Encode a mouse event into xterm mouse-protocol bytes, or nil when the
+    /// current mode and encoding produce no report for it.
+    ///
+    /// This is the only part of mouse reporting that can be asserted without a
+    /// window: an NSEvent is AppKit, but the bytes it becomes are not. Keeping the
+    /// encoding here means `--mouse-test` can check every mode and encoding with
+    /// nothing but integers.
+    ///
+    /// X10:   ESC [ M Cb Cx Cy        (press only; no release, no motion)
+    /// SGR:   ESC [ < Cb ; Cx ; Cy M  (M = press/motion, m = release)
+    ///
+    /// Coordinates are 0-based grid cells; xterm adds 33 to each byte.
+    public static func mouseReport(mode: MouseMode, encoding: MouseEncoding,
+                                  button: Int, col: Int, row: Int,
+                                  shift: Bool = false, option: Bool = false,
+                                  control: Bool = false,
+                                  isMotion: Bool = false, isRelease: Bool = false,
+                                  isScrollWheel: Bool = false, scrollDeltaY: Double = 0) -> [UInt8]? {
+        guard mode != .off else { return nil }
+        if isMotion {
+            if mode == .click { return nil }
+            if mode == .drag && button == 3 { return nil }
+        }
+
+        let cx = col + 33
+        let cy = row + 33
+        var cb = button
+        var pressed = !isRelease
+        if isMotion { cb |= 0x40 }
+        if shift { cb |= 0x08 }
+        if option { cb |= 0x10 }
+        if control { cb |= 0x20 }
+        if isScrollWheel {
+            cb = scrollDeltaY < 0 ? 4 : 5
+            pressed = true
+        }
+
+        switch encoding {
+        case .x10:
+            guard !isRelease, !isMotion else { return nil }
+            return [0x1B, 0x5B, 0x4D, UInt8(cb + 32), UInt8(cx), UInt8(cy)]
+        case .sgr:
+            let marker: UInt8 = isRelease ? 0x6D : 0x4D  // 'm' or 'M'
+            return [0x1B, 0x5B, 0x3C] + Array("\(cb);\(cx);\(cy)".utf8) + [marker]
+        }
+    }
+
     /// The character sets selectable with `ESC ( x` / `ESC ) x`.
     public enum Charset: Equatable {
         case ascii

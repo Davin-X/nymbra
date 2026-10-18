@@ -509,20 +509,33 @@ final class TermView: NSView {
         let cy = position.row + 33
 
         var button: Int
-        var pressed: Bool
+        var isRelease = false
+        var isMotion = false
         switch event.type {
-        case .leftMouseDown:   button = 0; pressed = true
-        case .leftMouseUp:     button = 3; pressed = false
-        case .rightMouseDown:  button = 2; pressed = true
-        case .rightMouseUp:    button = 3; pressed = false
-        case .otherMouseDown:  button = 1; pressed = true
-        case .otherMouseUp:    button = 3; pressed = false
-        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-            button = 3; pressed = false  // motion
+        case .leftMouseDown:   button = 0; isRelease = false; isMotion = false
+        case .leftMouseUp:     button = 0; isRelease = true;  isMotion = false
+        case .rightMouseDown:  button = 2; isRelease = false; isMotion = false
+        case .rightMouseUp:    button = 2; isRelease = true;  isMotion = false
+        case .otherMouseDown:  button = 1; isRelease = false; isMotion = false
+        case .otherMouseUp:    button = 1; isRelease = true;  isMotion = false
+        case .leftMouseDragged:   button = 0; isRelease = false; isMotion = true
+        case .rightMouseDragged:  button = 2; isRelease = false; isMotion = true
+        case .otherMouseDragged:  button = 1; isRelease = false; isMotion = true
+        case .mouseMoved:         button = 3; isRelease = false; isMotion = true
+        case .scrollWheel:
+            button = event.scrollingDeltaY < 0 ? 4 : 5; isRelease = false; isMotion = false
         default: return nil
         }
 
+        // Mode gating: click mode has no motion; drag mode has motion only with a
+        // button held (a bare move is not reported).
+        if isMotion {
+            if screen.mouseMode == .click { return nil }
+            if screen.mouseMode == .drag && button == 3 { return nil }
+        }
+
         var cb = button
+        if isMotion { cb |= 0x40 }
         if event.modifierFlags.contains(.shift)   { cb |= 0x08 }
         if event.modifierFlags.contains(.option)  { cb |= 0x10 }
         if event.modifierFlags.contains(.control) { cb |= 0x20 }
@@ -530,25 +543,31 @@ final class TermView: NSView {
         // Scroll wheel: buttons 4 (up) and 5 (down).
         if event.type == .scrollWheel {
             cb = event.scrollingDeltaY < 0 ? 4 : 5
-            pressed = true
         }
 
         switch screen.mouseEncoding {
         case .x10:
-            guard pressed else { return nil }  // X10 has no release or motion
+            // X10 only reports presses (no motion, no release).
+            guard !isRelease, !isMotion else { return nil }
             return [0x1B, 0x5B, 0x4D, UInt8(cb + 32), UInt8(cx), UInt8(cy)]
         case .sgr:
-            let marker = pressed ? UInt8(ascii: "M") : UInt8(ascii: "m")
+            let marker: UInt8 = isRelease ? 0x6D : 0x4D  // 'm' or 'M'
             return [0x1B, 0x5B, 0x3C] + Array("\(cb);\(cx);\(cy)".utf8) + [marker]
         }
     }
 
     /// Send a mouse report to the PTY if mouse reporting is enabled.
     /// `isMotion` suppresses the report in `.click` mode, which has no motion.
-    private func sendMouseReport(for event: NSEvent, isMotion: Bool = false) {
-        if isMotion, screen.mouseMode == .click { return }
+    private func sendMouseReport(for event: NSEvent) {
         guard let bytes = mouseReportBytes(for: event) else { return }
         onInput?(bytes)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        // Mode 1003 (any-event tracking) reports motion without a button. The
+        // other modes ignore a bare move, and mouseReportBytes says so.
+        guard screen.mouseMode == .motion else { return }
+        sendMouseReport(for: event)
     }
 
     // MARK: - Selection
@@ -590,7 +609,7 @@ final class TermView: NSView {
         // A drag after a double-click keeps the word selected; only a plain drag
         // starts a new selection. Mouse reporting takes precedence.
         if screen.mouseMode != .off {
-            sendMouseReport(for: event, isMotion: true)
+            sendMouseReport(for: event)
             return
         }
         guard let anchor = dragAnchor else { return }
@@ -626,7 +645,7 @@ final class TermView: NSView {
 
     override func rightMouseDragged(with event: NSEvent) {
         if screen.mouseMode != .off {
-            sendMouseReport(for: event, isMotion: true)
+            sendMouseReport(for: event)
             return
         }
     }
@@ -647,7 +666,7 @@ final class TermView: NSView {
 
     override func otherMouseDragged(with event: NSEvent) {
         if screen.mouseMode != .off {
-            sendMouseReport(for: event, isMotion: true)
+            sendMouseReport(for: event)
             return
         }
     }
