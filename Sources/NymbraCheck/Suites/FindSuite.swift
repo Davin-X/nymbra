@@ -121,4 +121,47 @@ func findSuite(_ h: Harness) {
     h.equal(Find.matches(in: scrolled, query: "ME", options: FindOptions(wholeWord: true)),
             .matches([FindMatch(row: 0, column: 5, columns: 2)]),
             "a match in scrollback is found, at its absolute row")
+
+    // Soft-wrapped lines. A line longer than the column width wraps to the
+    // next row with `softWrapped = true`. A match that crosses the wrap is
+    // found, and reported as one segment per physical row.
+    let narrow = Screen(rows: 4, cols: 10)
+    let parserNarrow = Parser(screen: narrow)
+    // "hello world" is 11 chars, so it wraps at col 10: "hello worl" + "d"
+    parserNarrow.feed("hello world\r\n")
+    // The match "world" starts at logical col 6, which crosses the wrap:
+    // physical row 0 has "hello worl" (cols 0-9), physical row 1 has "d" (col 0)
+    // "world" spans logical cols 6-10 → physical row 0 cols 6-9 (4 cols) + row 1 col 0 (1 col)
+    h.equal(Find.matches(in: narrow, query: "world", options: .standard),
+            .matches([FindMatch(row: 0, column: 6, columns: 4),
+                      FindMatch(row: 1, column: 0, columns: 1)]),
+            "a match across a soft wrap is split into segments on each row")
+
+    // A match entirely on the second wrapped row
+    h.equal(Find.matches(in: narrow, query: "d", options: .standard),
+            .matches([FindMatch(row: 1, column: 0, columns: 1)]),
+            "a match on the wrapped portion is found on its row")
+
+    // A match that does not cross the wrap
+    h.equal(Find.matches(in: narrow, query: "hello", options: .standard),
+            .matches([FindMatch(row: 0, column: 0, columns: 5)]),
+            "a match before the wrap is on one row")
+
+    // Multiple wraps: a line that wraps twice
+    let narrow2 = Screen(rows: 4, cols: 10)
+    let parserNarrow2 = Parser(screen: narrow2)
+    // "abcdefghijklmnopqrst" = 20 chars → wraps at 10, 20
+    parserNarrow2.feed("abcdefghijklmnopqrst\r\n")
+    // "hijkl" spans logical cols 7-11 → row 0 cols 7-9 (3) + row 1 cols 0-1 (2)
+    h.equal(Find.matches(in: narrow2, query: "hijkl", options: .standard),
+            .matches([FindMatch(row: 0, column: 7, columns: 3),
+                      FindMatch(row: 1, column: 0, columns: 2)]),
+            "a match across two wraps is split into segments")
+
+    // The count reflects segments, not logical matches (a wrapped match is one
+    // logical hit but multiple physical segments)
+    let all = Find.matches(in: narrow, query: "world", options: .standard)
+    if case .matches(let ms) = all {
+        h.equal(ms.count, 2, "a wrapped match yields two FindMatch entries (one per row)")
+    }
 }

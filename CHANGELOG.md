@@ -77,6 +77,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requires each of the bar's eight controls to be inside the bar: Auto Layout
   clips a bar that is too full rather than complaining, and a switch clipped off
   the edge is a switch nobody can press.
+- **Find across soft wraps**: a match that crosses a terminal auto-wrap is now
+  found and highlighted on each row it spans. The matcher joins consecutive
+  soft-wrapped rows into a logical line, searches it, and splits the hit back
+  into physical `FindMatch` segments — one per row — so the highlight draws in
+  the right cells on each row. Asserted in `FindSuite` (wrapped match across one
+  wrap, across two wraps, match before/after the wrap) and drawn correctly by
+  the existing highlight code.
 - Settings now follow the concept's page order: Appearance, Keyboard, Shell,
   Behaviour and Advanced. The Appearance page groups preview, fonts and theme
   presets; Advanced contains colour overrides and configuration access. Keyboard

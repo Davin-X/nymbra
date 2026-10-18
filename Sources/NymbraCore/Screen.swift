@@ -1090,6 +1090,20 @@ public final class Screen {
         scrollback.count - Swift.min(Swift.max(scrollOffset, 0), scrollback.count)
     }
 
+    /// Whether the given absolute row (in the scrollback + live space) is a
+    /// soft-wrapped continuation of the row above it. Only live rows can be
+    /// soft-wrapped; scrollback rows are always false because the wrap
+    /// relationship is not preserved once a row leaves the live screen.
+    ///
+    /// This is what lets the find matcher join rows that were broken by the
+    /// terminal's auto-wrap, so a search can find text that spans the wrap.
+    public func isSoftWrapped(absoluteRow: Int) -> Bool {
+        // The live screen starts at absolute row `scrollback.count`
+        let liveRow = absoluteRow - scrollback.count
+        guard liveRow >= 0, liveRow < rows else { return false }
+        return softWrapped[liveRow]
+    }
+
     public func dump(trim: Bool = true) -> String {
         (0..<rows).map { rowText($0, trim: trim) }.joined(separator: "\n")
     }

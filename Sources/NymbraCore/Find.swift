@@ -103,28 +103,74 @@ public enum Find {
             }
         }
 
+        // Build logical lines: consecutive rows where row N+1 is a soft wrap
+        // of row N. For each logical line we keep the extended glyphs (with
+        // physical row/col) so we can map a hit back to physical segments.
+        struct ExtendedGlyph {
+            let text: String
+            let physRow: Int
+            let physCol: Int
+            let columns: Int
+        }
+
         var found: [FindMatch] = []
-        let rows = screen.scrollback + screen.displayRows(scrollOffset: 0)
-        for (row, line) in rows.enumerated() {
-            let glyphs = glyphs(ofLine: line)
-            guard !glyphs.isEmpty else { continue }
-            let offsets = utf16Offsets(of: glyphs)
-            let text = glyphs.map(\.text).joined()
+        let allRows = screen.scrollback + screen.displayRows(scrollOffset: 0)
+
+        var lineStart = 0
+        while lineStart < allRows.count {
+            // Collect consecutive soft-wrapped rows
+            var rowsInLine = [lineStart]
+            var next = lineStart + 1
+            while next < allRows.count, screen.isSoftWrapped(absoluteRow: next) {
+                rowsInLine.append(next)
+                next += 1
+            }
+
+            // Build extended glyphs for this logical line
+            var extGlyphs: [ExtendedGlyph] = []
+            for physRow in rowsInLine {
+                let line = allRows[physRow]
+                let glyphs = glyphs(ofLine: line)
+                for g in glyphs {
+                    extGlyphs.append(ExtendedGlyph(text: g.text,
+                                                   physRow: physRow,
+                                                   physCol: g.cell,
+                                                   columns: g.columns))
+                }
+            }
+
+            // Search this logical line
+            let searchGlyphs = extGlyphs.map { Glyph(text: $0.text, cell: 0, columns: $0.columns) }
+            let offsets = utf16Offsets(of: searchGlyphs)
+            let text = extGlyphs.map(\.text).joined()
 
             for range in findRanges(text) {
                 guard range.location + range.length < offsets.count else { continue }
                 let first = offsets[range.location]
                 let end = offsets[range.location + range.length]
                 guard end > first else { continue }
-                if options.wholeWord, !isWordBounded(glyphs, from: first, to: end) { continue }
-                let last = glyphs[end - 1]
-                found.append(FindMatch(row: row,
-                                       column: glyphs[first].cell,
-                                       columns: last.cell + last.columns - glyphs[first].cell))
+                if options.wholeWord, !isWordBounded(searchGlyphs, from: first, to: end) { continue }
+
+                // Split the hit [first, end) by physical row
+                var segmentStart = first
+                for segEnd in (first + 1)...end {
+                    let isLast = segEnd == end
+                    let nextPhysRow = isLast ? (extGlyphs[end - 1].physRow + 1) : extGlyphs[segEnd].physRow
+                    let currentPhysRow = extGlyphs[segEnd - 1].physRow
+                    if isLast || nextPhysRow != currentPhysRow {
+                        let segFirst = extGlyphs[segmentStart]
+                        let segLast = extGlyphs[segEnd - 1]
+                        found.append(FindMatch(row: currentPhysRow,
+                                               column: segFirst.physCol,
+                                               columns: segLast.physCol + segLast.columns - segFirst.physCol))
+                        segmentStart = segEnd
+                    }
+                }
             }
+
+            lineStart = next
         }
-        return .matches(found)
-    }
+        return .matches(found)    }
 
     /// One cell as a person reads it: its text, where it sits, and how many cells
     /// it covers. The trailing half of a wide character is not a glyph — it is the
