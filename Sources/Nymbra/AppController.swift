@@ -219,6 +219,18 @@ final class AppController: NSObject {
         activeWindow?.focusedView?.clearBuffer()
     }
 
+    @objc func find(_ sender: Any?) {
+        activeWindow?.focusedView?.startFind()
+    }
+
+    @objc func findNext(_ sender: Any?) {
+        activeWindow?.focusedView?.findNext()
+    }
+
+    @objc func findPrevious(_ sender: Any?) {
+        activeWindow?.focusedView?.findPrevious()
+    }
+
     @objc func increaseFontSize(_ sender: Any?) {
         changeFontSize(by: 1)
     }

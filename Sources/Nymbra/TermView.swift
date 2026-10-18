@@ -728,6 +728,85 @@ final class TermView: NSView {
         needsDisplay = true
     }
 
+    // MARK: - Find
+
+    /// State for the find overlay.
+    private struct FindState {
+        var query: String = ""
+        var matches: [(row: Int, col: Int, len: Int)] = []
+        var currentIndex: Int = -1
+    }
+
+    private var findState: FindState?
+
+    /// Open the find overlay with the given query (empty to start fresh).
+    func startFind(query: String = "") {
+        findState = FindState(query: query)
+        findAll()
+        needsDisplay = true
+    }
+
+    func findNext() {
+        guard var state = findState, !state.matches.isEmpty else { return }
+        state.currentIndex = (state.currentIndex + 1) % state.matches.count
+        findState = state
+        scrollToMatch(state.matches[state.currentIndex])
+    }
+
+    func findPrevious() {
+        guard var state = findState, !state.matches.isEmpty else { return }
+        state.currentIndex = (state.currentIndex - 1 + state.matches.count) % state.matches.count
+        findState = state
+        scrollToMatch(state.matches[state.currentIndex])
+    }
+
+    private func findAll() {
+        var state = findState!
+        let query = state.query.lowercased()
+        var matches: [(row: Int, col: Int, len: Int)] = []
+
+        // Search in scrollback
+        for (rowIndex, rowCells) in screen.scrollback.enumerated() {
+            let text = Screen.text(ofLine: rowCells).lowercased()
+            var searchStart = text.startIndex
+            while let range = text[searchStart...].range(of: query) {
+                let col = text.distance(from: text.startIndex, to: range.lowerBound)
+                let len = query.count
+                matches.append((row: rowIndex, col: col, len: len))
+                searchStart = range.upperBound
+            }
+        }
+
+        // Search in live screen
+        for row in 0..<screen.rows {
+            let text = screen.rowText(row).lowercased()
+            var searchStart = text.startIndex
+            while let range = text[searchStart...].range(of: query) {
+                let col = text.distance(from: text.startIndex, to: range.lowerBound)
+                let len = query.count
+                let absoluteRow = screen.scrollback.count + row
+                matches.append((row: absoluteRow, col: col, len: len))
+                searchStart = range.upperBound
+            }
+        }
+
+        state.matches = matches
+        state.currentIndex = matches.isEmpty ? -1 : 0
+        findState = state
+        if !matches.isEmpty {
+            scrollToMatch(matches[0])
+        }
+    }
+
+    private func scrollToMatch(_ match: (row: Int, col: Int, len: Int)) {
+        let totalLines = screen.scrollback.count + screen.rows
+        let targetRow = match.row
+        // Scroll so the match is in the middle of the viewport if possible.
+        let offset = max(0, targetRow - screen.rows / 2)
+        scrollOffset = max(0, min(offset, screen.scrollback.count))
+        needsDisplay = true
+    }
+
     override func doCommand(by selector: Selector) {
         // Swallow the system beep for keys we do not handle.
         if selector == #selector(NSResponder.insertNewline(_:)) { return }

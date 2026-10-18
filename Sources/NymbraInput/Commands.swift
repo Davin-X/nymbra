@@ -22,6 +22,9 @@ public enum Command: String, CaseIterable, Sendable {
     case paste
     case selectAll
     case clearBuffer
+    case find
+    case findNext
+    case findPrevious
     case settings
     case increaseFontSize
     case decreaseFontSize
@@ -57,6 +60,12 @@ public enum Command: String, CaseIterable, Sendable {
             return "Select All"
         case .clearBuffer:
             return "Clear Buffer"
+        case .find:
+            return "Find\u{2026}"
+        case .findNext:
+            return "Find Next"
+        case .findPrevious:
+            return "Find Previous"
         case .settings:
             return "Settings\u{2026}"
         case .increaseFontSize:
@@ -97,6 +106,12 @@ public enum Command: String, CaseIterable, Sendable {
             return "Select everything on screen"
         case .clearBuffer:
             return "Clear the screen and scrollback"
+        case .find:
+            return "Search the scrollback and current output"
+        case .findNext:
+            return "Jump to the next match"
+        case .findPrevious:
+            return "Jump to the previous match"
         case .settings:
             return "Open this window"
         case .increaseFontSize:
@@ -140,6 +155,12 @@ public enum Command: String, CaseIterable, Sendable {
             return Shortcut(parsing: "cmd+a")
         case .clearBuffer:
             return Shortcut(parsing: "cmd+k")
+        case .find:
+            return Shortcut(parsing: "cmd+f")
+        case .findNext:
+            return Shortcut(parsing: "cmd+g")
+        case .findPrevious:
+            return Shortcut(parsing: "cmd+shift+g")
         case .settings:
             return Shortcut(parsing: "cmd+comma")
         case .increaseFontSize:

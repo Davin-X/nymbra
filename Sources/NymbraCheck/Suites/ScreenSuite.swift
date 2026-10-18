@@ -536,4 +536,33 @@ func screenSuite(_ h: Harness) {
         h.equal(t.row(0), "abc", "a hard newline is not joined by reflow")
         h.equal(t.row(1), "def", "it stays where it was")
     }
+
+    // MARK: - Find
+
+    do {
+        let t = Term(rows: 5, cols: 20)
+        t.feed("Hello world\nHello universe\nHello find me\n")
+        // Push some lines to scrollback
+        for _ in 0..<3 { t.screen.scrollUp(1) }
+
+        // Search in scrollback
+        var foundInScrollback = false
+        for row in t.screen.scrollback {
+            let text = Screen.text(ofLine: row).lowercased()
+            if text.contains("hello") {
+                foundInScrollback = true
+            }
+        }
+        h.expect(foundInScrollback, "find locates 'hello' in scrollback")
+
+        // Search in live screen
+        var foundInLive = false
+        for row in 0..<t.screen.rows {
+            let text = t.screen.rowText(row).lowercased()
+            if text.contains("find me") {
+                foundInLive = true
+            }
+        }
+        h.expect(foundInLive, "find locates 'find me' in live screen")
+    }
 }
