@@ -9,6 +9,15 @@ import Foundation
 /// advertising a shortcut that does nothing.
 public enum Command: String, CaseIterable, Sendable {
     case newWindow
+    case newTab
+    case closeTab
+    case nextTab
+    case previousTab
+    case splitRight
+    case splitDown
+    case closePane
+    case focusNextPane
+    case focusPreviousPane
     case copy
     case paste
     case selectAll
@@ -20,28 +29,80 @@ public enum Command: String, CaseIterable, Sendable {
     /// What a menu calls it.
     public var title: String {
         switch self {
-        case .newWindow: return "New Window"
-        case .copy: return "Copy"
-        case .paste: return "Paste"
-        case .selectAll: return "Select All"
-        case .clearBuffer: return "Clear Buffer"
-        case .settings: return "Settings\u{2026}"
-        case .increaseFontSize: return "Increase Font Size"
-        case .decreaseFontSize: return "Decrease Font Size"
+        case .newWindow:
+            return "New Window"
+        case .newTab:
+            return "New Tab"
+        case .closeTab:
+            return "Close Tab"
+        case .nextTab:
+            return "Next Tab"
+        case .previousTab:
+            return "Previous Tab"
+        case .splitRight:
+            return "Split Right"
+        case .splitDown:
+            return "Split Down"
+        case .closePane:
+            return "Close Pane"
+        case .focusNextPane:
+            return "Focus Next Pane"
+        case .focusPreviousPane:
+            return "Focus Previous Pane"
+        case .copy:
+            return "Copy"
+        case .paste:
+            return "Paste"
+        case .selectAll:
+            return "Select All"
+        case .clearBuffer:
+            return "Clear Buffer"
+        case .settings:
+            return "Settings\u{2026}"
+        case .increaseFontSize:
+            return "Increase Font Size"
+        case .decreaseFontSize:
+            return "Decrease Font Size"
         }
     }
 
     /// A sentence for the settings window, since "Clear Buffer" is not obvious.
     public var explanation: String {
         switch self {
-        case .newWindow: return "Open another window, with a shell of its own"
-        case .copy: return "Copy the selection to the clipboard"
-        case .paste: return "Paste the clipboard into the terminal"
-        case .selectAll: return "Select everything on screen"
-        case .clearBuffer: return "Clear the screen and scrollback"
-        case .settings: return "Open this window"
-        case .increaseFontSize: return "Make the text bigger"
-        case .decreaseFontSize: return "Make the text smaller"
+        case .newWindow:
+            return "Open another window, with a shell of its own"
+        case .newTab:
+            return "A new shell in this window, filling it"
+        case .closeTab:
+            return "Close the current tab"
+        case .nextTab:
+            return "Switch to the next tab"
+        case .previousTab:
+            return "Switch to the previous tab"
+        case .splitRight:
+            return "Put a new shell beside this one"
+        case .splitDown:
+            return "Put a new shell below this one"
+        case .closePane:
+            return "Close the pane with the keyboard; the window, if it is the last one"
+        case .focusNextPane:
+            return "Move the keyboard to the next pane"
+        case .focusPreviousPane:
+            return "Move the keyboard to the previous pane"
+        case .copy:
+            return "Copy the selection to the clipboard"
+        case .paste:
+            return "Paste the clipboard into the terminal"
+        case .selectAll:
+            return "Select everything on screen"
+        case .clearBuffer:
+            return "Clear the screen and scrollback"
+        case .settings:
+            return "Open this window"
+        case .increaseFontSize:
+            return "Make the text bigger"
+        case .decreaseFontSize:
+            return "Make the text smaller"
         }
     }
 
@@ -51,14 +112,40 @@ public enum Command: String, CaseIterable, Sendable {
     /// that muscle memory from other applications transfers.
     public var defaultShortcut: Shortcut? {
         switch self {
-        case .newWindow: return Shortcut(parsing: "cmd+n")
-        case .copy: return Shortcut(parsing: "cmd+c")
-        case .paste: return Shortcut(parsing: "cmd+v")
-        case .selectAll: return Shortcut(parsing: "cmd+a")
-        case .clearBuffer: return Shortcut(parsing: "cmd+k")
-        case .settings: return Shortcut(parsing: "cmd+comma")
-        case .increaseFontSize: return Shortcut(parsing: "cmd+equal")
-        case .decreaseFontSize: return Shortcut(parsing: "cmd+minus")
+        case .newWindow:
+            return Shortcut(parsing: "cmd+n")
+        case .newTab:
+            return Shortcut(parsing: "cmd+shift+t")
+        case .closeTab:
+            return Shortcut(parsing: "cmd+shift+w")
+        case .nextTab:
+            return Shortcut(parsing: "cmd+shift+rightbracket")
+        case .previousTab:
+            return Shortcut(parsing: "cmd+shift+leftbracket")
+        case .splitRight:
+            return Shortcut(parsing: "cmd+d")
+        case .splitDown:
+            return Shortcut(parsing: "cmd+shift+d")
+        case .closePane:
+            return Shortcut(parsing: "cmd+w")
+        case .focusNextPane:
+            return Shortcut(parsing: "cmd+rightbracket")
+        case .focusPreviousPane:
+            return Shortcut(parsing: "cmd+leftbracket")
+        case .copy:
+            return Shortcut(parsing: "cmd+c")
+        case .paste:
+            return Shortcut(parsing: "cmd+v")
+        case .selectAll:
+            return Shortcut(parsing: "cmd+a")
+        case .clearBuffer:
+            return Shortcut(parsing: "cmd+k")
+        case .settings:
+            return Shortcut(parsing: "cmd+comma")
+        case .increaseFontSize:
+            return Shortcut(parsing: "cmd+equal")
+        case .decreaseFontSize:
+            return Shortcut(parsing: "cmd+minus")
         }
     }
 

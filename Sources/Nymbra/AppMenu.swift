@@ -60,9 +60,14 @@ enum AppMenu {
         return root
     }
 
-    /// File holds what makes a window and what ends one. Both are ordinary
-    /// platform behaviour, which is the point: a terminal that cannot open a
-    /// second window is not one you can work in.
+    /// File holds what makes a window or a pane and what ends one. Both are
+    /// ordinary platform behaviour, which is the point: a terminal that cannot
+    /// open a second window is not one you can work in.
+    ///
+    /// ⌘W closes the focused *pane*, and the window only when it is the last
+    /// one — which is what a person means by it, and why "Close Window" here is
+    /// ⇧⌘W. The Window menu has no key equivalent for closing for the same
+    /// reason: a menu may not advertise a chord that the File menu takes first.
     private static func fileMenu(controller: AppController,
                                  configuration: Configuration) -> NSMenuItem {
         let root = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
@@ -71,8 +76,20 @@ enum AppMenu {
 
         menu.addItem(command(.newWindow, #selector(AppController.newWindow(_:)),
                              target: controller, configuration: configuration))
+        menu.addItem(command(.newTab, #selector(AppController.newTab(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(command(.closeTab, #selector(AppController.closeTab(_:)),
+                             target: controller, configuration: configuration))
         menu.addItem(.separator())
-        menu.addItem(standard("Close Window", #selector(NSWindow.performClose(_:)), key: "w"))
+        menu.addItem(command(.nextTab, #selector(AppController.nextTab(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(command(.previousTab, #selector(AppController.previousTab(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(.separator())
+        menu.addItem(command(.closePane, #selector(AppController.closePane(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(standard("Close Window", #selector(NSWindow.performClose(_:)),
+                              key: "", modifiers: []))
         return root
     }
 
@@ -94,12 +111,26 @@ enum AppMenu {
         return root
     }
 
+    /// Panes are View's business rather than File's: they change what one window
+    /// shows, not what exists. Splitting and moving between panes belong next to
+    /// each other because they are the same thought — where the next shell goes,
+    /// and which one is listening.
     private static func viewMenu(controller: AppController,
                                  configuration: Configuration) -> NSMenuItem {
         let root = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
         let menu = NSMenu(title: "View")
         root.submenu = menu
 
+        menu.addItem(command(.splitRight, #selector(AppController.splitRight(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(command(.splitDown, #selector(AppController.splitDown(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(.separator())
+        menu.addItem(command(.focusNextPane, #selector(AppController.focusNextPane(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(command(.focusPreviousPane, #selector(AppController.focusPreviousPane(_:)),
+                             target: controller, configuration: configuration))
+        menu.addItem(.separator())
         menu.addItem(command(.increaseFontSize, #selector(AppController.increaseFontSize(_:)),
                              target: controller, configuration: configuration))
         menu.addItem(command(.decreaseFontSize, #selector(AppController.decreaseFontSize(_:)),
@@ -117,7 +148,10 @@ enum AppMenu {
         menu.addItem(standard("Minimize", #selector(NSWindow.performMiniaturize(_:)), key: "m"))
         menu.addItem(standard("Zoom", #selector(NSWindow.performZoom(_:)), key: "", modifiers: []))
         menu.addItem(.separator())
-        menu.addItem(standard("Close Window", #selector(NSWindow.performClose(_:)), key: "w"))
+        // No key equivalent: ⌘W is Close Pane in the File menu, and a menu may not
+        // advertise a chord another menu takes first.
+        menu.addItem(standard("Close Window", #selector(NSWindow.performClose(_:)),
+                              key: "", modifiers: []))
         menu.addItem(.separator())
         menu.addItem(plain("Bring All to Front", #selector(NSApplication.arrangeInFront(_:)),
                            target: NSApp))
@@ -207,21 +241,36 @@ enum AppMenu {
     private static func name(of key: String) -> String {
         guard key.count == 1, let scalar = key.unicodeScalars.first else { return key.uppercased() }
         switch scalar.value {
-        case 0xF700: return "\u{2191}"
-        case 0xF701: return "\u{2193}"
-        case 0xF702: return "\u{2190}"
-        case 0xF703: return "\u{2192}"
-        case 0xF704...0xF717: return "F\(scalar.value - 0xF704 + 1)"
-        case 0xF728: return "\u{2326}"
-        case 0xF729: return "\u{2196}"
-        case 0xF72B: return "\u{2198}"
-        case 0xF72C: return "\u{21DE}"
-        case 0xF72D: return "\u{21DF}"
-        case 0x0D: return "\u{21A9}"
-        case 0x09: return "\u{21E5}"
-        case 0x1B: return "\u{238B}"
-        case 0x08: return "\u{232B}"
-        case 0x20: return "Space"
+        case 0xF700:
+            return "\u{2191}"
+        case 0xF701:
+            return "\u{2193}"
+        case 0xF702:
+            return "\u{2190}"
+        case 0xF703:
+            return "\u{2192}"
+        case 0xF704...0xF717:
+            return "F\(scalar.value - 0xF704 + 1)"
+        case 0xF728:
+            return "\u{2326}"
+        case 0xF729:
+            return "\u{2196}"
+        case 0xF72B:
+            return "\u{2198}"
+        case 0xF72C:
+            return "\u{21DE}"
+        case 0xF72D:
+            return "\u{21DF}"
+        case 0x0D:
+            return "\u{21A9}"
+        case 0x09:
+            return "\u{21E5}"
+        case 0x1B:
+            return "\u{238B}"
+        case 0x08:
+            return "\u{232B}"
+        case 0x20:
+            return "Space"
         default: return key.uppercased()
         }
     }

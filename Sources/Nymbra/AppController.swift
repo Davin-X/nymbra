@@ -38,20 +38,17 @@ final class AppController: NSObject {
     func makeWindow() -> TerminalWindow? {
         discardClosedWindows()
 
-        let terminal: Terminal
+        let window: TerminalWindow
         do {
-            terminal = try Terminal(size: GridSize(rows: 24, cols: 80),
-                                    shell: configuration.shell.path)
+            window = try TerminalWindow(configuration: configuration)
         } catch {
             cannotStartShell(error)
             return nil
         }
 
-        let window = TerminalWindow(configuration: configuration, terminal: terminal)
-        window.onExit = { [weak self, weak window] in
-            guard let self, let window else { return }
-            self.noteExit(of: window)
-        }
+        // A split can fail after the window is up, and a shell that will not start
+        // is the one failure that leaves nothing on screen to explain itself.
+        window.onSpawnFailure = { [weak self] error in self?.cannotStartShell(error) }
         windows.append(window)
         window.makeKeyAndOrderFront()
         return window
@@ -106,6 +103,37 @@ final class AppController: NSObject {
         _ = window
     }
 
+    /// Panes: the window keeps the keyboard, and the pane under it moves.
+    ///
+    /// Each of these is one line because the decision is not here — it is in
+    /// `TerminalWindow`, which owns the layout and the shells, and in
+    /// `PaneLayout`, where the arithmetic is asserted without a window.
+    @objc func splitRight(_ sender: Any?) {
+        activeWindow?.split(.sideBySide)
+    }
+
+    @objc func splitDown(_ sender: Any?) {
+        activeWindow?.split(.stacked)
+    }
+
+    /// ⌘W. The pane the keyboard is in, and the window when it is the last one:
+    /// "close the thing I am typing into" is what a person means by it, and with
+    /// one pane on screen that is the window.
+    @objc func closePane(_ sender: Any?) {
+        guard let window = activeWindow else { return }
+        if !window.closeFocusedPane() {
+            window.window.performClose(nil)
+        }
+    }
+
+    @objc func focusNextPane(_ sender: Any?) {
+        activeWindow?.focusNextPane()
+    }
+
+    @objc func focusPreviousPane(_ sender: Any?) {
+        activeWindow?.focusPreviousPane()
+    }
+
     // MARK: - Settings
 
     /// Apply a configuration to every open terminal, then write it out.
@@ -146,6 +174,23 @@ final class AppController: NSObject {
         _ = makeWindow()
     }
 
+    @objc func newTab(_ sender: Any?) {
+        activeWindow?.newTab()
+    }
+
+    @objc func closeTab(_ sender: Any?) {
+        guard let window = activeWindow else { return }
+        window.closeFocusedTab()
+    }
+
+    @objc func nextTab(_ sender: Any?) {
+        activeWindow?.selectNextTab()
+    }
+
+    @objc func previousTab(_ sender: Any?) {
+        activeWindow?.selectPreviousTab()
+    }
+
     @objc func showSettings(_ sender: Any?) {
         if settingsController == nil {
             settingsController = SettingsWindowController(configuration: configuration) { [weak self] updated in
@@ -159,19 +204,19 @@ final class AppController: NSObject {
     }
 
     @objc func copy(_ sender: Any?) {
-        activeWindow?.view.copySelectionToPasteboard()
+        activeWindow?.focusedView?.copySelectionToPasteboard()
     }
 
     @objc func paste(_ sender: Any?) {
-        activeWindow?.view.pasteFromPasteboard()
+        activeWindow?.focusedView?.pasteFromPasteboard()
     }
 
     @objc func selectAll(_ sender: Any?) {
-        activeWindow?.view.selectEverything()
+        activeWindow?.focusedView?.selectEverything()
     }
 
     @objc func clearBuffer(_ sender: Any?) {
-        activeWindow?.view.clearBuffer()
+        activeWindow?.focusedView?.clearBuffer()
     }
 
     @objc func increaseFontSize(_ sender: Any?) {

@@ -101,9 +101,15 @@ public final class Screen {
 
     public private(set) var altScreenActive = false
     public private(set) var scrollback: [[Cell]] = []
+    /// Whether each row was broken by the terminal itself (a soft wrap) rather
+    /// than by a line feed. A soft-wrapped row is a continuation of the one
+    /// above it, which is what makes reflow on resize possible: the rows
+    /// that were joined by the terminal can be joined again, and only those.
+    private var softWrapped: [Bool] = []
     public var scrollbackLimit = 10_000
 
     private var savedPrimaryGrid: [Cell] = []
+    private var savedPrimarySoftWrapped: [Bool] = []
     private var savedState: SavedState?
     private var tabStops: [Bool]
     private var charsetG0: Charset = .ascii
@@ -127,6 +133,7 @@ public final class Screen {
         self.rows = r
         self.cols = c
         self.grid = Array(repeating: Cell(), count: r * c)
+        self.softWrapped = Array(repeating: false, count: r)
         self.tabStops = Screen.defaultTabStops(cols: c)
         self.scrollBottom = r - 1
     }
@@ -198,7 +205,14 @@ public final class Screen {
     private func wrapToNextLine() {
         cursor.pendingWrap = false
         cursor.col = 0
+        let before = cursor.row
         lineFeed()
+        // The row we landed on is a continuation of the one above: that is what
+        // makes it a soft wrap, and it is the only thing that lets reflow know
+        // which rows were broken by the terminal rather than by a newline.
+        if cursor.row >= 0 && cursor.row < rows && cursor.row != before {
+            softWrapped[cursor.row] = true
+        }
     }
 
     /// Attach a zero-width scalar (a combining mark, or a ZWJ) to the cell that
@@ -324,8 +338,10 @@ public final class Screen {
                 let source = (row + 1) * cols
                 let destination = row * cols
                 for col in 0..<cols { grid[destination + col] = grid[source + col] }
+                softWrapped[row] = softWrapped[row + 1]
             }
             for col in 0..<cols { grid[scrollBottom * cols + col] = blankCell() }
+            softWrapped[scrollBottom] = false
         }
     }
 
@@ -337,9 +353,11 @@ public final class Screen {
                 let source = (row - 1) * cols
                 let destination = row * cols
                 for col in 0..<cols { grid[destination + col] = grid[source + col] }
+                softWrapped[row] = softWrapped[row - 1]
                 row -= 1
             }
             for col in 0..<cols { grid[scrollTop * cols + col] = blankCell() }
+            softWrapped[scrollTop] = false
         }
     }
 
@@ -583,14 +601,18 @@ public final class Screen {
         guard enabled != altScreenActive else { return }
         if enabled {
             savedPrimaryGrid = grid
+            savedPrimarySoftWrapped = softWrapped
             grid = Array(repeating: Cell(), count: rows * cols)
+            softWrapped = Array(repeating: false, count: rows)
             altScreenActive = true
             cursor = Cursor()
             scrollTop = 0
             scrollBottom = rows - 1
         } else {
             grid = savedPrimaryGrid
+            softWrapped = savedPrimarySoftWrapped
             savedPrimaryGrid = []
+            savedPrimarySoftWrapped = []
             altScreenActive = false
         }
     }
@@ -792,6 +814,7 @@ public final class Screen {
         savedState = nil
         scrollback.removeAll()
         grid = Array(repeating: Cell(), count: rows * cols)
+        softWrapped = Array(repeating: false, count: rows)
     }
 
     /// DECALN (`ESC # 8`): the alignment test pattern.
@@ -803,36 +826,74 @@ public final class Screen {
         cursor = Cursor()
     }
 
-    /// Resize, preserving content. Text is not reflowed: a line that is cut off
-    /// is lost rather than rewrapped (see docs/ROADMAP.md — reflow is M3).
+    /// Resize, preserving content. Soft-wrapped lines are reflowed into the new
+    /// width; a line that was broken by the terminal itself is joined or split as
+    /// the width demands, and a line that came from an explicit newline is not.
     public func resize(rows newRows: Int, cols newCols: Int) {
         let r = max(1, newRows)
         let c = max(1, newCols)
         guard r != rows || c != cols else { return }
 
-        var next = [Cell](repeating: Cell(), count: r * c)
-        let copyRows = min(rows, r)
-        let copyCols = min(cols, c)
-        for row in 0..<copyRows {
-            for col in 0..<copyCols {
-                next[row * c + col] = grid[row * cols + col]
-            }
+        if altScreenActive {
+            // An application owns the alt screen and reacts to SIGWINCH itself;
+            // preserving its content verbatim is what it expects.
+            resizeSimple(rows: r, cols: c)
+            return
         }
 
-        // Do not leave half a wide character at either edge of the new grid.
-        if c > 0 {
-            for row in 0..<copyRows {
-                if case .scalar(let scalar) = next[row * c + c - 1].content,
-                   Screen.displayWidth(of: scalar) == 2 {
-                    next[row * c + c - 1] = Cell()
+        // Collect the primary screen as logical lines. A row whose
+        // `softWrapped` is set is a continuation of the line above it, so the
+        // logical line runs through it; a row that is not soft-wrapped starts a
+        // new one. Trailing blanks are trimmed only from the last row of each
+        // logical line, since the earlier rows were filled by the terminal.
+        var logicalLines: [[Cell]] = []
+        var current: [Cell] = []
+        for row in 0..<rows {
+            if row > 0 && !softWrapped[row] && !current.isEmpty {
+                while !current.isEmpty, current.last!.content == .empty,
+                      !current.last!.isWideContinuation {
+                    current.removeLast()
                 }
-                if next[row * c].isWideContinuation { next[row * c] = Cell() }
+                logicalLines.append(current)
+                current = []
             }
+            current.append(contentsOf: Array(grid[(row * cols)..<((row + 1) * cols)]))
+        }
+        if !current.isEmpty {
+            while !current.isEmpty, current.last!.content == .empty,
+                  !current.last!.isWideContinuation {
+                current.removeLast()
+            }
+            logicalLines.append(current)
+        }
+        if logicalLines.isEmpty { logicalLines.append([]) }
+        // Reflow each logical line into the new width.
+        var newGrid = [Cell](repeating: Cell(), count: r * c)
+        var newSoft = Array(repeating: false, count: r)
+        var row = 0
+        for line in logicalLines {
+            if row >= r { break }
+            let (rows, soft) = reflow(line, into: c)
+            for (i, cells) in rows.enumerated() {
+                if row + i >= r { break }
+                for (col, cell) in cells.enumerated() {
+                    if col < c { newGrid[(row + i) * c + col] = cell }
+                }
+                newSoft[row + i] = (i > 0) && soft[i]
+            }
+            row += rows.count
         }
 
-        grid = next
+        grid = newGrid
+        softWrapped = newSoft
         rows = r
         cols = c
+
+        // Cursor: preserve the logical line and offset as best we can. A full
+        // mapping is owed; for now, clamp, which matches the previous behaviour.
+        cursor.row = min(cursor.row, r - 1)
+        cursor.col = min(cursor.col, c - 1)
+        cursor.pendingWrap = false
 
         var stops = Array(tabStops.prefix(c))
         if stops.count < c { stops.append(contentsOf: Array(repeating: false, count: c - stops.count)) }
@@ -845,6 +906,87 @@ public final class Screen {
         cursor.row = min(cursor.row, r - 1)
         cursor.col = min(cursor.col, c - 1)
         cursor.pendingWrap = false
+
+        // Reflow the scrollback too: each entry is one hard line, so it is
+        // padded or trimmed to the new width rather than joined.
+        for i in scrollback.indices {
+            var line = scrollback[i]
+            if line.count < c {
+                line.append(contentsOf: Array(repeating: Cell(), count: c - line.count))
+            } else if line.count > c {
+                line = Array(line.prefix(c))
+            }
+            scrollback[i] = line
+        }
+    }
+
+    /// The old resize: preserve what fits, trim the rest. Used for the alt screen,
+    /// where the application reacts to SIGWINCH itself.
+    private func resizeSimple(rows r: Int, cols c: Int) {
+        guard r != rows || c != cols else { return }
+        var next = [Cell](repeating: Cell(), count: r * c)
+        let copyRows = min(rows, r)
+        let copyCols = min(cols, c)
+        for row in 0..<copyRows {
+            for col in 0..<copyCols {
+                next[row * c + col] = grid[row * cols + col]
+            }
+        }
+        if c > 0 {
+            for row in 0..<copyRows {
+                if case .scalar(let scalar) = next[row * c + c - 1].content,
+                   Screen.displayWidth(of: scalar) == 2 {
+                    next[row * c + c - 1] = Cell()
+                }
+                if next[row * c].isWideContinuation { next[row * c] = Cell() }
+            }
+        }
+        grid = next
+        softWrapped = Array(repeating: false, count: r)
+        rows = r
+        cols = c
+        var stops = Array(tabStops.prefix(c))
+        if stops.count < c { stops.append(contentsOf: Array(repeating: false, count: c - stops.count)) }
+        tabStops = stops
+        if scrollBottom >= r {
+            scrollTop = 0
+            scrollBottom = r - 1
+        }
+        cursor.row = min(cursor.row, r - 1)
+        cursor.col = min(cursor.col, c - 1)
+        cursor.pendingWrap = false
+    }
+
+    /// Reflow one logical line's cells into `width` columns.
+    private func reflow(_ cells: [Cell], into width: Int) -> (rows: [[Cell]], soft: [Bool]) {
+        let w = max(1, width)
+        var rows: [[Cell]] = [[]]
+        var soft: [Bool] = [false]
+        var col = 0
+        for cell in cells where !cell.isWideContinuation {
+            let cw = max(1, Screen.displayWidth(of: cell.scalarOrBlank))
+            if col + cw > w {
+                while rows[rows.count - 1].count < w { rows[rows.count - 1].append(Cell()) }
+                rows.append([])
+                soft.append(true)
+                col = 0
+            }
+            if cw > w {
+                // A cell wider than the whole line: drop it rather than corrupt the grid.
+                continue
+            }
+            rows[rows.count - 1].append(cell)
+            if cw == 2 {
+                rows[rows.count - 1].append(Cell(content: .empty, attributes: cell.attributes, isWideContinuation: true))
+            }
+            col += cw
+            if col == w {
+                // Exact fit: the next cell wraps. Leave col == w so the next
+                // iteration wraps; do not append a blank row yet.
+            }
+        }
+        while rows[rows.count - 1].count < w { rows[rows.count - 1].append(Cell()) }
+        return (rows, soft)
     }
 
     // MARK: - Reading

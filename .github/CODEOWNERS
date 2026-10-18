@@ -1,0 +1,27 @@
+# Code owners for Nymbra
+# This file defines who reviews what. See GitHub docs for syntax.
+
+# Default owner for everything
+* @Davin-X
+
+# Core emulation — VT parser, screen model, PTY
+Sources/NymbraCore/Parser.swift @Davin-X
+Sources/NymbraCore/Screen.swift @Davin-X
+Sources/NymbraCore/PTY.swift @Davin-X
+Sources/NymbraCore/Terminal.swift @Davin-X
+
+# UI layer
+Sources/Nymbra/ @Davin-X
+
+# Input (keyboard, shortcuts, commands)
+Sources/NymbraInput/ @Davin-X
+
+# Build/CI
+.github/workflows/ @Davin-X
+Makefile @Davin-X
+Package.swift @Davin-X
+
+# Docs
+docs/ @Davin-X
+README.md @Davin-X
+CHANGELOG.md @Davin-X

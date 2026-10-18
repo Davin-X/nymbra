@@ -14,6 +14,9 @@ import NymbraInput
 final class TermView: NSView {
     var onInput: (([UInt8]) -> Void)?
     var onResize: ((GridSize) -> Void)?
+    /// A click landed here, so this pane should take the keyboard. Altitude rather
+    /// than a decision: which pane is focused is the window's to say.
+    var onFocus: (() -> Void)?
 
     private let screen: Screen
 
@@ -49,6 +52,17 @@ final class TermView: NSView {
     /// Cursor blink phase, and the timer that advances it.
     private var blinkOn = true
     private var blinkTimer: Timer?
+
+    /// Whether this pane has the keyboard. Drawn, because with more than one pane
+    /// on screen "where does my typing go?" has to be answerable at a glance: an
+    /// unfocused pane shows its cursor as an outline.
+    var isFocused = true {
+        didSet {
+            guard isFocused != oldValue else { return }
+            updateBlinkTimer()
+            needsDisplay = true
+        }
+    }
 
     /// The current selection, if any. An optional rather than an empty selection,
     /// so a plain click clears the highlight instead of leaving one cell lit.
@@ -199,14 +213,14 @@ final class TermView: NSView {
                                     blinks: configuration.behaviour.cursorBlinks)
     }
 
-    /// Blink only when the shape asks for it, the setting allows it, and the
-    /// window is focused: a blinking cursor in an unfocused window is noise.
+    /// Blink only when the shape asks for it, the setting allows it, and this pane
+    /// has the keyboard: a blinking cursor in a pane nobody is typing into is noise.
     private func updateBlinkTimer() {
         blinkTimer?.invalidate()
         blinkTimer = nil
         blinkOn = true
 
-        guard window != nil, cursorStyle.blinks, configuration.behaviour.cursorBlinks else { return }
+        guard isFocused, window != nil, cursorStyle.blinks, configuration.behaviour.cursorBlinks else { return }
         blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             guard let self, self.window?.isKeyWindow == true else { return }
             self.blinkOn.toggle()
@@ -331,6 +345,11 @@ final class TermView: NSView {
         let style = cursorStyle
         if style.blinks, !blinkOn { return }
 
+        guard isFocused else {
+            drawUnfocusedCursor(ctx, style: style)
+            return
+        }
+
         let cursor = screen.cursor
         let origin = cellOrigin(col: cursor.col, row: cursor.row)
 
@@ -358,6 +377,28 @@ final class TermView: NSView {
             ctx.textPosition = CGPoint(x: origin.x, y: baseline(row: cursor.row))
             CTLineDraw(line, ctx)
         }
+    }
+
+    /// The cursor of a pane that does not have the keyboard: the same shape, drawn
+    /// as an outline. Visible enough to say "there is a cursor here", not filled
+    /// enough to claim that typing lands here.
+    private func drawUnfocusedCursor(_ ctx: CGContext, style: Screen.CursorStyle) {
+        let cursor = screen.cursor
+        let origin = cellOrigin(col: cursor.col, row: cursor.row)
+        ctx.setStrokeColor(theme.cursor)
+        ctx.setLineWidth(1)
+
+        let rect: CGRect
+        switch style {
+        case .bar, .barBlink:
+            rect = CGRect(x: origin.x + 0.5, y: origin.y, width: 1, height: cellHeight - 1)
+        case .underline, .underlineBlink:
+            rect = CGRect(x: origin.x, y: origin.y + cellHeight - 1.5, width: cellWidth - 1, height: 1)
+        case .block, .blockBlink:
+            rect = CGRect(x: origin.x + 0.5, y: origin.y + 0.5,
+                          width: cellWidth - 1, height: cellHeight - 1)
+        }
+        ctx.stroke(rect)
     }
 
     // MARK: - Input
@@ -402,6 +443,12 @@ final class TermView: NSView {
     /// than going to the program, which is what a user expects. Mouse reporting
     /// takes precedence over this once it lands.
     override func scrollWheel(with event: NSEvent) {
+        // Mouse reporting takes precedence over scrollback scrolling: a program
+        // that asked for mouse events gets scroll-up/down buttons instead.
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
         guard !screen.scrollback.isEmpty else { return }
         if event.hasPreciseScrollingDeltas {
             scrollRemainder += event.scrollingDeltaY
@@ -442,10 +489,81 @@ final class TermView: NSView {
         onInput?(newlinesRemoved)
     }
 
+    // MARK: - Mouse reporting
+
+    /// Convert an NSEvent into xterm mouse-protocol bytes, or nil when the
+    /// event is not a mouse report (or mouse reporting is off).
+    ///
+    /// X10:   ESC [ M Cb Cx Cy        (press only; no release, no motion)
+    /// SGR:   ESC [ < Cb ; Cx ; Cy M  (M = press, m = release)
+    ///
+    /// Coordinates are 0-based grid cells; xterm adds 33 to each byte.
+    /// Button byte: low 3 bits = button (0=left,1=middle,2=right,3=release),
+    /// bit 3 = shift, bit 4 = option, bit 5 = control.
+    private func mouseReportBytes(for event: NSEvent) -> [UInt8]? {
+        guard screen.mouseMode != .off else { return nil }
+
+        let location = convert(event.locationInWindow, from: nil)
+        guard let position = cellPosition(at: location) else { return nil }
+        let cx = position.col + 33
+        let cy = position.row + 33
+
+        var button: Int
+        var pressed: Bool
+        switch event.type {
+        case .leftMouseDown:   button = 0; pressed = true
+        case .leftMouseUp:     button = 3; pressed = false
+        case .rightMouseDown:  button = 2; pressed = true
+        case .rightMouseUp:    button = 3; pressed = false
+        case .otherMouseDown:  button = 1; pressed = true
+        case .otherMouseUp:    button = 3; pressed = false
+        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            button = 3; pressed = false  // motion
+        default: return nil
+        }
+
+        var cb = button
+        if event.modifierFlags.contains(.shift)   { cb |= 0x08 }
+        if event.modifierFlags.contains(.option)  { cb |= 0x10 }
+        if event.modifierFlags.contains(.control) { cb |= 0x20 }
+
+        // Scroll wheel: buttons 4 (up) and 5 (down).
+        if event.type == .scrollWheel {
+            cb = event.scrollingDeltaY < 0 ? 4 : 5
+            pressed = true
+        }
+
+        switch screen.mouseEncoding {
+        case .x10:
+            guard pressed else { return nil }  // X10 has no release or motion
+            return [0x1B, 0x5B, 0x4D, UInt8(cb + 32), UInt8(cx), UInt8(cy)]
+        case .sgr:
+            let marker = pressed ? UInt8(ascii: "M") : UInt8(ascii: "m")
+            return [0x1B, 0x5B, 0x3C] + Array("\(cb);\(cx);\(cy)".utf8) + [marker]
+        }
+    }
+
+    /// Send a mouse report to the PTY if mouse reporting is enabled.
+    /// `isMotion` suppresses the report in `.click` mode, which has no motion.
+    private func sendMouseReport(for event: NSEvent, isMotion: Bool = false) {
+        if isMotion, screen.mouseMode == .click { return }
+        guard let bytes = mouseReportBytes(for: event) else { return }
+        onInput?(bytes)
+    }
+
     // MARK: - Selection
 
     override func mouseDown(with event: NSEvent) {
+        // Mouse reporting takes precedence over selection: when a program has
+        // asked for mouse events, they go to the PTY, not to the highlight.
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
         window?.makeFirstResponder(self)
+        // Told, not asked: the window decides which pane has the keyboard, and it
+        // is the one that has to draw the change.
+        onFocus?()
         let point = convert(event.locationInWindow, from: nil)
         guard let position = cellPosition(at: point) else { return }
 
@@ -470,7 +588,11 @@ final class TermView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         // A drag after a double-click keeps the word selected; only a plain drag
-        // starts a new selection.
+        // starts a new selection. Mouse reporting takes precedence.
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event, isMotion: true)
+            return
+        }
         guard let anchor = dragAnchor else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard let position = cellPosition(at: point) else { return }
@@ -479,7 +601,55 @@ final class TermView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        // Mouse reporting takes precedence over selection.
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
         dragAnchor = nil
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
+        // Right-click without mouse reporting does nothing by default.
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event, isMotion: true)
+            return
+        }
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event)
+            return
+        }
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        if screen.mouseMode != .off {
+            sendMouseReport(for: event, isMotion: true)
+            return
+        }
     }
 
     /// The cell under a point, in viewport coordinates. Points outside the grid

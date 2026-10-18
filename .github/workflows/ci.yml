@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Nightly fuzz + emulation run: catches regressions that land between
+    # commits without waiting for a push or pull request.
+    - cron: "0 2 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,6 +25,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            .swiftpm
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
 
       - name: Toolchain
         run: |
@@ -112,10 +126,30 @@ jobs:
             || { echo "::error::a closed window did not come back with a working shell"; exit 1; }
           echo "Reopen after close passed"
 
+      # Tabs: a strip you can see, and a shell in each that no other tab can
+      # disturb. No window is shown.
+      - name: Tabs
+        run: |
+          .build/release/Nymbra --tabs-test > tabs.out 2> tabs.err &
+          pid=$!
+          for _ in $(seq 1 45); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            echo "::error::--tabs-test did not finish"
+          fi
+          wait "$pid" 2>/dev/null || true
+          cat tabs.err >&2 || true
+          cat tabs.out
+          grep -q "strip=1 plus=1 created=1 ownShells=1 independent=1 switched=1 " tabs.out \
+            || { echo "::error::tabs did not work"; exit 1; }
+          grep -q "title=1 closed=2 sameShells=1 lastTabClosesWindow=1" tabs.out \
+            || { echo "::error::tabs did not work"; exit 1; }
+          echo "Tabs passed"
+
       - name: Docs present
         run: |
           for f in README.md LICENSE CONTRIBUTING.md CHANGELOG.md \
-                   docs/ARCHITECTURE.md docs/ROADMAP.md; do
+                   docs/ARCHITECTURE.md docs/ROADMAP.md docs/CONFIG.md; do
             test -s "$f" || { echo "missing or empty: $f"; exit 1; }
           done
           echo "docs OK"

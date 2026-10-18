@@ -165,8 +165,10 @@ public struct Shortcut: Equatable, Hashable, Sendable {
     /// tests can assert instead of something only a running menu can reveal.
     public var menuKey: String {
         switch key {
-        case .character(let character): return String(character)
-        case .named(let named): return named.menuKey
+        case .character(let character):
+            return String(character)
+        case .named(let named):
+            return named.menuKey
         }
     }
 }
@@ -174,16 +176,20 @@ public struct Shortcut: Equatable, Hashable, Sendable {
 extension Shortcut.Key {
     fileprivate var text: String {
         switch self {
-        case .character(let character): return String(character)
-        case .named(let named): return named.text
+        case .character(let character):
+            return String(character)
+        case .named(let named):
+            return named.text
         }
     }
 
     /// The key as a person sees it in a menu: `←`, `F5`, `C`.
     public var displayText: String {
         switch self {
-        case .character(let character): return String(character).uppercased()
-        case .named(let named): return named.displayText
+        case .character(let character):
+            return String(character).uppercased()
+        case .named(let named):
+            return named.displayText
         }
     }
 }
@@ -191,43 +197,75 @@ extension Shortcut.Key {
 extension Shortcut.Key.Named {
     fileprivate var text: String {
         switch self {
-        case .returnKey: return "return"
-        case .keypadEnter: return "keypadenter"
-        case .tab: return "tab"
-        case .space: return "space"
-        case .escape: return "escape"
-        case .delete: return "delete"
-        case .forwardDelete: return "forwarddelete"
-        case .left: return "left"
-        case .right: return "right"
-        case .up: return "up"
-        case .down: return "down"
-        case .home: return "home"
-        case .end: return "end"
-        case .pageUp: return "pageup"
-        case .pageDown: return "pagedown"
-        case .function(let number): return "f\(number)"
+        case .returnKey:
+            return "return"
+        case .keypadEnter:
+            return "keypadenter"
+        case .tab:
+            return "tab"
+        case .space:
+            return "space"
+        case .escape:
+            return "escape"
+        case .delete:
+            return "delete"
+        case .forwardDelete:
+            return "forwarddelete"
+        case .left:
+            return "left"
+        case .right:
+            return "right"
+        case .up:
+            return "up"
+        case .down:
+            return "down"
+        case .home:
+            return "home"
+        case .end:
+            return "end"
+        case .pageUp:
+            return "pageup"
+        case .pageDown:
+            return "pagedown"
+        case .function(let number):
+            return "f\(number)"
         }
     }
 
     fileprivate var displayText: String {
         switch self {
-        case .returnKey: return "↩"
-        case .keypadEnter: return "⌤"
-        case .tab: return "⇥"
-        case .space: return "Space"
-        case .escape: return "⎋"
-        case .delete: return "⌫"
-        case .forwardDelete: return "⌦"
-        case .left: return "←"
-        case .right: return "→"
-        case .up: return "↑"
-        case .down: return "↓"
-        case .home: return "↖"
-        case .end: return "↘"
-        case .pageUp: return "⇞"
-        case .pageDown: return "⇟"
-        case .function(let number): return "F\(number)"
+        case .returnKey:
+            return "↩"
+        case .keypadEnter:
+            return "⌤"
+        case .tab:
+            return "⇥"
+        case .space:
+            return "Space"
+        case .escape:
+            return "⎋"
+        case .delete:
+            return "⌫"
+        case .forwardDelete:
+            return "⌦"
+        case .left:
+            return "←"
+        case .right:
+            return "→"
+        case .up:
+            return "↑"
+        case .down:
+            return "↓"
+        case .home:
+            return "↖"
+        case .end:
+            return "↘"
+        case .pageUp:
+            return "⇞"
+        case .pageDown:
+            return "⇟"
+        case .function(let number):
+            return "F\(number)"
         }
     }
 
@@ -235,21 +273,36 @@ extension Shortcut.Key.Named {
     /// platform's function-key code points.
     fileprivate var menuKey: String {
         switch self {
-        case .returnKey: return "\r"
-        case .keypadEnter: return "\u{3}"
-        case .tab: return "\t"
-        case .space: return " "
-        case .escape: return "\u{1B}"
-        case .delete: return "\u{8}"
-        case .forwardDelete: return "\u{F728}"
-        case .left: return "\u{F702}"
-        case .right: return "\u{F703}"
-        case .up: return "\u{F700}"
-        case .down: return "\u{F701}"
-        case .home: return "\u{F729}"
-        case .end: return "\u{F72B}"
-        case .pageUp: return "\u{F72C}"
-        case .pageDown: return "\u{F72D}"
+        case .returnKey:
+            return "\r"
+        case .keypadEnter:
+            return "\u{3}"
+        case .tab:
+            return "\t"
+        case .space:
+            return " "
+        case .escape:
+            return "\u{1B}"
+        case .delete:
+            return "\u{8}"
+        case .forwardDelete:
+            return "\u{F728}"
+        case .left:
+            return "\u{F702}"
+        case .right:
+            return "\u{F703}"
+        case .up:
+            return "\u{F700}"
+        case .down:
+            return "\u{F701}"
+        case .home:
+            return "\u{F729}"
+        case .end:
+            return "\u{F72B}"
+        case .pageUp:
+            return "\u{F72C}"
+        case .pageDown:
+            return "\u{F72D}"
         case .function(let number):
             guard let scalar = UnicodeScalar(0xF704 + number - 1) else { return "" }
             return String(Character(scalar))
@@ -260,21 +313,36 @@ extension Shortcut.Key.Named {
     /// has a code but no useful characters.
     fileprivate var keyCode: UInt16? {
         switch self {
-        case .returnKey: return Keyboard.Key.returnKey.rawValue
-        case .keypadEnter: return Keyboard.Key.keypadEnter.rawValue
-        case .tab: return Keyboard.Key.tab.rawValue
-        case .space: return 49
-        case .escape: return Keyboard.Key.escape.rawValue
-        case .delete: return Keyboard.Key.delete.rawValue
-        case .forwardDelete: return Keyboard.Key.forwardDelete.rawValue
-        case .left: return Keyboard.Key.left.rawValue
-        case .right: return Keyboard.Key.right.rawValue
-        case .up: return Keyboard.Key.up.rawValue
-        case .down: return Keyboard.Key.down.rawValue
-        case .home: return Keyboard.Key.home.rawValue
-        case .end: return Keyboard.Key.end.rawValue
-        case .pageUp: return Keyboard.Key.pageUp.rawValue
-        case .pageDown: return Keyboard.Key.pageDown.rawValue
+        case .returnKey:
+            return Keyboard.Key.returnKey.rawValue
+        case .keypadEnter:
+            return Keyboard.Key.keypadEnter.rawValue
+        case .tab:
+            return Keyboard.Key.tab.rawValue
+        case .space:
+            return 49
+        case .escape:
+            return Keyboard.Key.escape.rawValue
+        case .delete:
+            return Keyboard.Key.delete.rawValue
+        case .forwardDelete:
+            return Keyboard.Key.forwardDelete.rawValue
+        case .left:
+            return Keyboard.Key.left.rawValue
+        case .right:
+            return Keyboard.Key.right.rawValue
+        case .up:
+            return Keyboard.Key.up.rawValue
+        case .down:
+            return Keyboard.Key.down.rawValue
+        case .home:
+            return Keyboard.Key.home.rawValue
+        case .end:
+            return Keyboard.Key.end.rawValue
+        case .pageUp:
+            return Keyboard.Key.pageUp.rawValue
+        case .pageDown:
+            return Keyboard.Key.pageDown.rawValue
         case .function(let number):
             let keys: [Keyboard.Key] = [
                 .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10,

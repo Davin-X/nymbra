@@ -16,5 +16,6 @@ paletteSuite(harness)
 selectionSuite(harness)
 shortcutSuite(harness)
 ptySuite(harness)
+paneLayoutSuite(harness)
 
 exit(harness.report())
