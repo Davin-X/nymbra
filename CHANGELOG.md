@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — tabs and split panes
+
+A window can hold several shells now. **Tabs** each own their panes, with a
+visible tab strip and a title that follows the focused shell (`⌘⇧T` new,
+`⌘⇧W` close, `⌘⇧[` / `⌘⇧]` to move between them). **Splits** put a second shell
+beside or below the current one (`⌘D`, `⌘⇧D`), closed with `⌘W`. Focus follows a
+click, and `⌘[` / `⌘]` move it between panes without the mouse.
+
+- Every pane owns an independent shell and an independent model, with no shared
+  mutable state between them — which is what makes four different programs in
+  four panes behave like four terminals rather than four views of one.
+  `make split-test` starts four panes, runs a command in each, and checks that
+  closing panes leaves the others undisturbed: `panes=4 … jobControl=1 …
+  closed=3 sameShells=1`.
+- The tab commands are asserted without a window by `make tabs-test`:
+  `strip=1 plus=1 created=1 ownShells=1 independent=1 switched=1 title=1
+  closed=2 sameShells=1 lastTabClosesWindow=1`.
+- The per-tab **unread badge** is not here: it needs the shell integration that
+  would raise it, which is M4.
+
+### Added — search in scrollback
+
+`⌘F` opens a find overlay. Matches are found in scrollback and on the live
+screen, highlighted where they sit, and stepped through with next/previous
+(`⌘G` / `⌘⇧G`). A match in history scrolls the viewport to it; typing returns to
+the live screen, as it does everywhere else.
+
+### Added — text reflow on resize
+
+Resizing used to preserve content without rewrapping it: a paragraph kept the row
+breaks it was written with, so a narrow pane showed a ragged column and a wide
+one a short one. The live screen now rejoins soft-wrapped rows and recuts them to
+the new width, so text reflows the way a document does; hard line breaks are
+never joined. Scrollback entries are one hard line each, so they are padded or
+cut to the new width rather than joined. The alternate screen keeps the old
+preserve-and-trim behaviour, because the application running there reacts to
+`SIGWINCH` itself.
+
+### Added — mouse reporting
+
+Programs that ask for mouse events now receive them. Modes `1000` (clicks),
+`1002` (drag) and `1003` (any motion) are tracked, in both the X10 and SGR
+encodings, with modifier bits carried through. While mouse reporting is on, the
+wheel is reported as buttons 4 and 5; with it off, the wheel scrolls scrollback
+as before.
+
 ### Fixed — Ctrl+C, Ctrl+Z and job control did nothing
 
 The most useful thing a terminal does after running a command is stop it. In

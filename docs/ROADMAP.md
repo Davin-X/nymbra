@@ -42,7 +42,7 @@ visible rather than discovered later.
 | Escape sequences: cursor, clear line/screen, scroll regions, save/restore | ✅ |
 | SGR: colour, bold, underline, reverse, reset | ✅ 16/256/truecolour, plus italic/faint/conceal/strike/underline styles |
 | Normal + alternate screen | ✅ 47/1047/1048/1049 |
-| Scrollback buffer | ⚠️ modelled (10 000 lines) but **no way to view it yet** |
+| Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen |
 | Keyboard: Enter, Backspace, delete, arrows, control keys | ✅ arrows honour DECCKM and carry xterm's modifier encoding; Option is meta; Shift-Tab is CBT |
 | Function keys F1–F12 | ✅ F1–F20, in the SS3 and `CSI n ~` forms |
 | UTF-8 across read boundaries, wide characters | ✅ |
@@ -56,8 +56,10 @@ visible rather than discovered later.
 |---|---|---|
 | Copy/paste | ✅ selection (click, word, line, drag), Cmd+C and Cmd+V with bracketed paste | — |
 | Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen | — |
-| Search in scrollback | ❌ | M3 |
+| Search in scrollback | ✅ find overlay, next/previous, matches highlighted in history and the live screen | — |
 | Tabs and split panes | ✅ | M1.x (P0) |
+| Text reflow on resize | ✅ live screen and history rewrap on resize; soft-wrapped rows are rejoined and rewrapped | — |
+| Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
 | Settings: theme, font, colours, cursor, keybindings | ✅ one JSON file, a settings window with live preview, and a readable palette | M2 |
 | Shell integration: prompt/command boundaries, notifications | ⚠️ bell sounds; `OSC 133` not parsed | M4 |
 | Session recovery/persistence | ❌ | M5 |
@@ -114,7 +116,7 @@ the parser, and CI asserts the result without a window.
 
 **Non-goals:** ligatures, image protocols, Kitty keyboard protocol.
 
-### M1.x — Tabs and splits 🔨 *in progress*
+### M1.x — Tabs and splits ✅
 
 A terminal with one pane is a toy. Broken out of M1 deliberately, so that the
 emulation core could be finished and verified first — and now the natural next
@@ -139,14 +141,19 @@ test earning its keep before the feature it was written for even exists: the
 shells that look correct cannot answer the question, and the witness that can is
 `/bin/sleep`, which never touches its terminal.
 
-**Still to do**
-- Tabs, with the unread badge M4 will fill in
-- Horizontal and vertical splits, resizable
-- Focus follows a click; keyboard navigation between panes
-- Each pane owns an independent `Terminal`; the view draws the focused model
+**Done**
+- **Tabs**, with a visible tab strip, each tab holding its own panes, and a title
+  that follows the focused shell — `⌘⇧T`, `⌘⇧W`, `⌘⇧[` / `⌘⇧]`. The per-tab
+  **unread badge** is deferred to M4, where the shell integration that sets it
+  lands.
+- **Horizontal and vertical splits** — `⌘D` and `⌘⇧D`, closed with `⌘W`, resized
+  with the window.
+- **Focus follows a click**, and `⌘[` / `⌘]` move it between panes.
+- Each pane owns an independent shell; the view draws the focused model.
 
 **Acceptance:** four panes, each running a different program, resized and closed
-independently, with no shared mutable state between them.
+independently, with no shared mutable state between them. — met: `make
+split-test` reports `panes=4 … jobControl=1 … closed=3 sameShells=1`.
 
 ### M2 — Settings and configuration ✅
 
@@ -219,21 +226,22 @@ both can print themselves (`--menu-test`, `--theme-test`) for CI to read.
 See [ADR-0006](adr/0006-configuration-as-a-validated-json-file.md) for why the
 file is JSON, why loading can never fail, and why the model is UI-free.
 
-### M3 — Metal renderer, reflow, mouse 🔜
+### M3 — Metal renderer, reflow, mouse 🔨 *in progress*
 
-**Scope**
+**Done**
+- **Text reflow on resize** — the live screen and history rewrap; soft-wrapped
+  rows are rejoined before they are recut, so a resize does not leave a paragraph
+  half on one row.
+- **Mouse reporting** for the modes already tracked — 1000/1002/1003, in the X10
+  and SGR encodings.
+- **Search in scrollback** — a find overlay, next/previous, matches highlighted
+  in history and on the live screen.
+
+**Remaining**
 - Glyph atlas rasterised once per (font, size, style) via CoreText
 - One instanced draw call per frame; damage tracking when worthwhile
 - 60 fps scrolling of a full screen at 4K; steady-state idle near 0% CPU
-- Block cursor, selection highlight, undercurl
-- Text selection, and therefore copy (the selection *model* and copy landed in
-  M2; this milestone draws and renders them at speed)
-- **Search in scrollback** — carried forward, since it needs the damage-tracked
-  renderer to show matches without redrawing everything
-- **Text reflow on resize** — carried over from M1, which preserves content but
-  does not rewrap
-- **Mouse reporting bytes** for the modes already tracked (1000/1002/1003,
-  x10 and SGR encodings)
+- Undercurl, and the block cursor and selection highlight drawn by the GPU
 
 **Acceptance:** a full-screen `yes` flood stays at frame rate with flat memory;
 CoreText drawing is removed, and `TermView` is a pure function of the model.

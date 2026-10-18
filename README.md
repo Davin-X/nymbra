@@ -184,7 +184,7 @@ Full detail, including the threading model and the invariants that must hold:
 | M1 | VT emulation, keyboard, scrollback viewport | ✅ core complete |
 | M2 | Settings, configuration, palettes, select and copy | ✅ complete |
 | M1.x | Tabs and splits | ✅ done |
-| M3 | Metal renderer, search, reflow, mouse | planned |
+| M3 | Metal renderer, search, reflow, mouse | 🔨 search, reflow and mouse done; Metal renderer next |
 | M4 | Shell integration (OSC 133) and notifications | planned |
 | M5 | Sessions: a PTY host that outlives the window | planned |
 | M6 | Signed, notarized release and updater | ⏳ bundle and icon done; signing remains |
