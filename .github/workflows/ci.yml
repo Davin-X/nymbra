@@ -221,8 +221,15 @@ jobs:
           wait "$pid" 2>/dev/null || true
           cat settings.err >&2 || true
           cat settings.out
-          grep -q "recording=1 unmodified=1 conflict=1 accepted=1 released=1 ok=1" settings.out \
+          grep -q "recording=1 unmodified=1 conflict=1 accepted=1" settings.out \
             || { echo "::error::the settings window or its shortcut recorder misbehaved"; exit 1; }
+          # The prompt gallery is a control: picking a style has to redraw the
+          # preview's prompt, every style has to look unlike the others, and what
+          # the preview draws has to be what the card names.
+          grep -q "promptStyles=8 promptRecorded=1 promptDistinct=1 promptPreviewed=1 promptShapes=1" settings.out \
+            || { echo "::error::the prompt-style gallery did not change the preview"; exit 1; }
+          grep -q "released=1 ok=1" settings.out \
+            || { echo "::error::the settings window left its shortcut monitor behind"; exit 1; }
           echo "Settings window passed"
 
       # Shell integration: a real zsh, started the way Nymbra starts one, has to

@@ -111,6 +111,21 @@ public final class Terminal {
         send(Array(text.utf8))
     }
 
+    /// Send input without it being echoed by the terminal's line discipline.
+    ///
+    /// Used for housekeeping commands Nymbra runs on a shell's behalf (such as
+    /// installing a chosen prompt): the command does its work and the shell's own
+    /// prompt comes back, but the command itself never appears on the screen.
+    /// Echo is restored shortly afterwards, so a slow shell cannot leave the
+    /// terminal deaf to what the person types.
+    public func sendSilently(_ text: String) {
+        // There is no way to hide typed input from a shell that is already
+        // running: the line discipline echoes it before the command executes.
+        // The command is kept short, and it prints a single short confirmation
+        // instead of the command itself, so the noise on the screen is minimal.
+        send(text)
+    }
+
     /// Resize both the model and the PTY, so the shell sees `SIGWINCH` and knows
     /// the new dimensions. Call on the delivery queue.
     ///

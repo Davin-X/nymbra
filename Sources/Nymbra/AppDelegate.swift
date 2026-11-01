@@ -12,7 +12,7 @@ import AppKit
 /// are fine": the default for reopening is to do nothing when there is nothing
 /// to reopen.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let controller: AppController
+    let controller: AppController
 
     init(controller: AppController) {
         self.controller = controller

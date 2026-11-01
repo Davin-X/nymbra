@@ -36,6 +36,18 @@ public struct Configuration: Codable, Equatable, Sendable {
 
         public var fontFamily: String = defaultFontFamily
         public var fontSize: Double = defaultFontSize
+        /// The prompt style the settings preview draws with. A name we do not
+        /// know is the default rather than a broken preview.
+        public var promptStyle: String = PromptStyle.fallback.rawValue
+
+        /// Whether the selected prompt style is handed to new zsh shells.
+        ///
+        /// Off by default and off for anyone who never chose: Nymbra is a guest in
+        /// the shell's startup, and replacing a prompt somebody has spent time on
+        /// is not something to do because a gallery happened to have a selected
+        /// tile. Picking a style turns this on; the toggle above the gallery turns
+        /// it off again.
+        public var promptStyleApplied = false
 
         public init() {}
 
@@ -43,6 +55,16 @@ public struct Configuration: Codable, Equatable, Sendable {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             fontFamily = container.orDefault(.fontFamily, Appearance.defaultFontFamily)
             fontSize = container.orDefault(.fontSize, Appearance.defaultFontSize)
+            promptStyle = PromptStyle(
+                stored: container.orDefault(.promptStyle, PromptStyle.fallback.rawValue)
+            ).rawValue
+            // Before the style reached a shell, the gallery still recorded a
+            // choice — a choice that did nothing. A config from that time with a
+            // non-default style is read as asking for it now; the default style
+            // is not, because most people never opened the gallery at all.
+            promptStyleApplied = container.orDefault(
+                .promptStyleApplied,
+                promptStyle != PromptStyle.fallback.rawValue)
         }
     }
 

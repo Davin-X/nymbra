@@ -163,11 +163,55 @@ func runSettingsTest(configuration: Configuration) -> Bool {
     controller.window?.close()
     let released = !controller.isRecordingShortcut
 
+    // The prompt-style gallery is a control, and a control has to change
+    // something. Picking a style redraws the live preview's prompt line, so this
+    // walks every style, presses its card, and compares what the *preview is
+    // drawing* against the same model the card is built from — the copy on the
+    // card and the prompt in the preview cannot come from two different places.
+    let promptStyles = controller.promptStyleTitles
+    let promptGalleryComplete = promptStyles == PromptStyle.allCases.map(\.rawValue)
+        && Set(promptStyles).count == promptStyles.count
+    let palette = Palette(preset: configuration.colours.preset,
+                          overrides: configuration.colours.overrides)
+    var promptDrawn: [String: String] = [:]
+    var promptRecorded = true
+    for style in PromptStyle.allCases {
+        promptRecorded = controller.choosePromptStyle(style.rawValue) == style.rawValue && promptRecorded
+        promptDrawn[style.rawValue] = controller.previewPromptText.joined(separator: "\n")
+    }
+    // Choosing a card is also asking for it. A recorded style that no shell will
+    // wear is the bug this test exists to keep fixed.
+    let promptAppliedAfterChoice = controller.isPromptStyleApplied
+    // Every style has to look unlike every other one, or the gallery is a row of
+    // buttons that all do the same nothing.
+    let promptDistinct = Set(promptDrawn.values).count == PromptStyle.allCases.count
+    // ...and the preview has to be drawing the style that was picked.
+    let promptPreviewed = PromptStyle.allCases.allSatisfy { style in
+        promptDrawn[style.rawValue] == PreviewView.promptLines(style, palette: palette)
+            .map { $0.map(\.text).joined() }
+            .joined(separator: "\n")
+    }
+    // A few shapes worth naming, because "it changed" and "it changed into the
+    // right thing" are different claims.
+    let promptShapes = promptDrawn[PromptStyle.git.rawValue]?.contains("git:(main)") == true
+        && promptDrawn[PromptStyle.pure.rawValue]?.hasSuffix("❯") == true
+        && promptDrawn[PromptStyle.robbyrussell.rawValue]?.hasSuffix("➜") == true
+        && promptDrawn[PromptStyle.starship.rawValue]?.contains("▸ ") == true
+        && promptDrawn[PromptStyle.spaceship.rawValue]?.hasPrefix("in ") == true
+        && promptDrawn[PromptStyle.agnoster.rawValue]?.contains(" ›") == true
+        && promptDrawn[PromptStyle.kali.rawValue]?.contains("\n") == true
+        && promptDrawn[PromptStyle.powerlevel10k.rawValue]?.contains("\n") == false
+
     let ok = galleryFilled && shortcutsListed && recording && unmodifiedRefused
         && conflictRefused && accepted && recordingAgain && released
+        && promptGalleryComplete && promptRecorded && promptDistinct && promptPreviewed && promptShapes
+        && promptAppliedAfterChoice
     print("settings-test\tgallery=\(controller.presetTitles.count) shortcuts=\(controller.shortcutBindings.count) "
           + "recording=\(flag(recording && recordingAgain)) unmodified=\(flag(unmodifiedRefused)) "
           + "conflict=\(flag(conflictRefused)) accepted=\(flag(accepted)) "
+          + "promptStyles=\(promptStyles.count) promptRecorded=\(flag(promptRecorded)) "
+          + "promptDistinct=\(flag(promptDistinct)) promptPreviewed=\(flag(promptPreviewed)) "
+          + "promptShapes=\(flag(promptShapes)) promptApplied=\(flag(promptAppliedAfterChoice)) "
           + "released=\(flag(released)) ok=\(flag(ok))")
     return ok
 }
@@ -970,12 +1014,22 @@ func runShellIntegrationTest() -> Bool {
         // merely the parser on the other end of them.
         var configuration = Configuration()
         configuration.behaviour.shellIntegration = true
+        // And a prompt the shell is meant to wear, so this test covers the
+        // application of a chosen style and not only the marks. `pure` ends on a
+        // glyph the user's own `.zshrc` above never prints, so seeing it on screen
+        // can only mean Nymbra's prompt replaced theirs.
+        configuration.appearance.promptStyle = PromptStyle.pure.rawValue
+        configuration.appearance.promptStyleApplied = true
         guard let integration = configuration.shellIntegration(
             in: generated, userZDOTDIR: userZDOTDIR.path
         ) else {
             print("shell-integration-test\tthe setting was on and the integration was not written")
             return false
         }
+        let promptInEnvironment = integration.environment["NYMBRA_PROMPT"]?.contains("❯") == true
+        let promptInSnippet = ((try? String(contentsOf: generated.appendingPathComponent("shell/nymbra.zsh"),
+                                            encoding: .utf8)) ?? "")
+            .contains("PROMPT=$NYMBRA_PROMPT")
 
         let queue = DispatchQueue(label: "dev.nymbra.shell-integration-test")
         let terminal = try Terminal(size: GridSize(rows: 24, cols: 80),
@@ -1065,6 +1119,9 @@ func runShellIntegrationTest() -> Bool {
         let status = marks.contains(.commandFinished(0))
         let failure = marks.contains(.commandFinished(7))
         let userConfig = text.contains("nymbra-ran=loaded")
+        // The prompt the person picked, on the screen rather than only in the
+        // environment it was handed over in: `pure` ends on `❯`.
+        let promptApplied = promptInEnvironment && promptInSnippet && text.contains("❯")
         // The encoder's half, read off the screen: every byte it exists for comes
         // back escaped, and everything else is left exactly as it was.
         let encoding = text.contains("encoded=a%07b%1Bc%0Ad%0De%09f%7Fg%25d%3Bh")
@@ -1089,8 +1146,10 @@ func runShellIntegrationTest() -> Bool {
               + " failed=\(failure ? 1 : 0)"
               + " userConfig=\(userConfig ? 1 : 0)"
               + " command=\(command ? 1 : 0)"
-              + " encoding=\(encoding ? 1 : 0)")
+              + " encoding=\(encoding ? 1 : 0)"
+              + " promptApplied=\(promptApplied ? 1 : 0)")
         return prompted && executed && status && failure && userConfig && command && encoding
+            && promptApplied
     } catch {
         FileHandle.standardError.write(Data("nymbra: shell-integration-test \(error)\n".utf8))
         return false
@@ -1373,9 +1432,12 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     //    above it, for a tab group AppKit maintains, holding none of Nymbra's tabs
     //    — no `+`, no title, no unread dot, and panes belonging to a different
     //    window — which is why it is off for the application and why this window
-    //    would refuse to join a group even if it were not.
+    //    would refuse to join a group even if it were not. Also assert the tab group
+    //    is actually nil (not just disallowed): a window that somehow joined a group
+    //    would have a non-nil tabGroup even if tabbing is disallowed.
     let onlyStrip = !NSWindow.allowsAutomaticWindowTabbing
         && window.window.tabbingMode == .disallowed
+        && window.window.tabGroup == nil
 
     // 2. The `+`: a control in the strip that is not a tab. It is not counted as a
     //    tab, and it is last, so the tabs read in the order they were opened and
@@ -1619,7 +1681,6 @@ if CommandLine.arguments.contains("--mouse-test") {
 }
 
 let app = NSApplication.shared
-app.setActivationPolicy(.regular)
 app.setActivationPolicy(.regular)
 
 let controller = AppController(configuration: settings)

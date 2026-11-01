@@ -126,6 +126,14 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         tabBar.onAdd = { [weak self] in _ = self?.newTab() }
         tabBar.onReorder = { [weak self] id, index in self?.reorderTab(id, to: index) }
         tabBar.onMenu = { [weak self] id, point in self?.showTabMenu(for: id, at: point) }
+
+        // Double-clicking the strip toggles the window between its resting size
+        // and a zoomed one, so the top bar is a quick handle for making room
+        // and getting it back.
+        let doubleClick = NSClickGestureRecognizer(target: self,
+                                                   action: #selector(tabBarDoubleClicked(_:)))
+        doubleClick.numberOfClicksRequired = 2
+        tabBar.addGestureRecognizer(doubleClick)
         findSearchField.placeholderString = "Find in terminal"
         findSearchField.delegate = self
 
@@ -587,6 +595,21 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         for tab in tabs.values { tab.apply(configuration) }
     }
 
+    /// Tell already-running shells about a new prompt. Font and theme changes
+    /// travel through `apply` above; a prompt is a shell variable, so it needs
+    /// a command instead.
+    func applyPromptStyle(_ configuration: Configuration) {
+        for tab in tabs.values { tab.applyPromptStyle(configuration) }
+    }
+
+    @objc private func tabBarDoubleClicked(_ sender: NSClickGestureRecognizer) {
+        if window.isZoomed {
+            window.zoom(nil)
+        } else {
+            window.zoom(nil)
+        }
+    }
+
     // MARK: - Unread
 
     /// A tab printed something.
@@ -621,6 +644,7 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     /// silently clear the mark.
     private func updateLabel(for id: TabID) {
         guard let tab = tabs[id] else { return }
+        tab.stripItem?.isUnread = unread.contains(id)
         tab.stripItem?.label = unread.contains(id) ? "\(tab.displayName) •" : tab.displayName
     }
 

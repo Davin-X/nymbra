@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the prompt gallery did nothing, because nothing drew it
+
+- **The Prompt style cards recorded a choice and then threw it away.** The
+  gallery wrote `appearance.promptStyle` and marked the chosen card, but no code
+  ever read the value, so every card did exactly nothing — the same nothing,
+  whichever one was pressed. The gallery now drives the live preview: the
+  preview's first line is the chosen prompt, drawn from the same `PromptStyle`
+  model the cards' own samples are built from, so a card and the preview cannot
+  describe two different prompts. `--settings-test` walks all eight styles, presses
+  each card, and compares what the *preview is drawing* against that model —
+  `promptPreviewed=1`, `promptDistinct=1`.
+- **And then the chosen prompt reaches a real shell.** Picking a card also turns
+  on `appearance.promptStyleApplied`, and Nymbra generates a zsh `PROMPT` from
+  the same runs, hands it to the child shell through the generated `ZDOTDIR`, and
+  installs it after the user's own startup files have run. The toggle above the
+  gallery turns it off again; it is independent of `shellIntegration`, so a
+  prompt does not silently enable command marking. Only new zsh shells are
+  affected, and nothing is written to the user's files.
+  `--shell-integration-test` asserts `promptApplied=1` by finding the chosen
+  style's glyph on screen, not merely in the environment.
+- Eight styles, and each is a *shape* rather than a string: `PromptStyle` in the
+  UI-free core says which pieces appear, in what order, in which palette slot,
+  and whether a piece is a filled block. The Powerline-shaped prompts
+  (`agnoster`, `powerlevel10k`) fill blocks; the rest draw coloured text. Every
+  run's ink is held to 4.5:1 against whatever is behind it in **every** preset,
+  so a preview cannot show text the terminal would have refused to draw.
+- A style name Nymbra does not know falls back to the default rather than
+  leaving the preview blank. The config file is hand-editable, and a typo in it
+  is not a reason for a prompt that draws nothing.
+- The preview is now as tall as what it draws. A fixed height clipped the
+  document once the font grew, and would have cropped the second line of the
+  two-line prompt the gallery offers.
+
 ### Fixed — the palette threw, and find mis-measured what it found
 
 - **The command palette crashed the application the first time it was opened.**

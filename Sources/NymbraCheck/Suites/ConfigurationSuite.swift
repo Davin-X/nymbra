@@ -211,6 +211,22 @@ func configurationSuite(_ h: Harness) {
     h.expect(zshrc.contains("${ZDOTDIR}/nymbra.zsh"),
              "and then the snippet, which is the only part that sends a mark")
 
+    // A prompt is its own reason to generate the files. It must not drag the
+    // command marks along: wanting a nicer prompt is not consent to be tracked.
+    var prompted = Configuration()
+    prompted.appearance.promptStyle = PromptStyle.pure.rawValue
+    prompted.appearance.promptStyleApplied = true
+    let promptOnly = prompted.shellIntegration(in: support, userZDOTDIR: "/tmp/user")
+    h.expect(promptOnly != nil, "an applied prompt generates an integration with the marks off")
+    h.expect(promptOnly?.environment["NYMBRA_PROMPT"]?.contains("❯") == true,
+             "the chosen prompt reaches the shell in its environment")
+    let promptSnippet = (try? String(contentsOf: generated.appendingPathComponent("nymbra.zsh"),
+                                     encoding: .utf8)) ?? ""
+    h.expect(promptSnippet.contains("PROMPT=$NYMBRA_PROMPT"),
+             "and the snippet installs it")
+    h.expect(!promptSnippet.contains("]133;A"),
+             "with the marks off, no prompt mark is sent")
+
     // MARK: Hostile input
 
     // Every one of these must leave the app able to start, and leave a

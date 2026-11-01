@@ -189,8 +189,13 @@ final class AppController: NSObject {
     /// terminal changing, not a mock-up.
     func apply(_ configuration: Configuration) {
         let shortcutsChanged = self.configuration.keyboard.overrides != configuration.keyboard.overrides
+        let promptChanged = self.configuration.appearance.promptStyle != configuration.appearance.promptStyle
+            || self.configuration.appearance.promptStyleApplied != configuration.appearance.promptStyleApplied
         self.configuration = configuration
         for window in windows { window.apply(configuration) }
+        if promptChanged {
+            for window in windows { window.applyPromptStyle(configuration) }
+        }
         commandPaletteController?.reload(configuration: configuration)
         if shortcutsChanged {
             AppMenu.install(controller: self, configuration: configuration)
@@ -247,6 +252,9 @@ final class AppController: NSObject {
         if settingsController == nil {
             settingsController = SettingsWindowController(configuration: configuration) { [weak self] updated in
                 self?.apply(updated)
+            }
+            settingsController?.onApplyPrompt = { [weak self] updated in
+                self?.windows.forEach { $0.applyPromptStyle(updated) }
             }
         }
         settingsController?.reload(from: configuration)

@@ -200,6 +200,63 @@ final class TerminalTab {
         for pane in panes.values { pane.view.apply(configuration) }
     }
 
+    /// Hand a chosen prompt to shells that are already running in this tab.
+    ///
+    /// A new shell picks its prompt up from the environment it is born with, but
+    /// one that is already alive has to be told. The assignment travels as a
+    /// base64-encoded script so the prompt's own `%` and `$` cannot be read as
+    /// shell syntax on the way through, and it is only sent to a pane whose
+    /// shell is at its own prompt — interrupting a running command with a
+    /// settings change would be worse than leaving the prompt alone.
+    func applyPromptStyle(_ configuration: Configuration) {
+        guard configuration.appearance.promptStyleApplied else { return }
+        guard (configuration.shell.path ?? "").contains("zsh")
+                || configuration.shell.path == nil else { return }
+        guard let command = Self.promptApplyCommand(style: PromptStyle(stored: configuration.appearance.promptStyle),
+                                                   palette: Palette(preset: configuration.colours.preset,
+                                                                    overrides: configuration.colours.overrides))
+        else { return }
+        for pane in panes.values where !pane.terminal.hasForegroundJob {
+            pane.terminal.sendSilently(command)
+        }
+    }
+
+    private static func promptApplyCommand(style: PromptStyle, palette: Palette) -> String? {
+        let zsh = style.zshPrompt(palette: palette)
+        var script = ""
+        if zsh.usesBranch {
+            script += "typeset -g __nmbra_branch=''\n"
+            script += "function __nmbra_prompt_precmd() {\n"
+            script += "  case \"$PWD\" in\n"
+            script += "    \"$HOME/Documents\"|\"$HOME/Documents\"/*|\"$HOME/Desktop\"|\"$HOME/Desktop\"/*|\"$HOME/Downloads\"|\"$HOME/Downloads\"/*)\n"
+            script += "      __nmbra_branch=''\n"
+            script += "      ;;\n"
+            script += "    *)\n"
+            script += "      __nmbra_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)\n"
+            script += "      ;;\n"
+            script += "  esac\n"
+            script += "}\n"
+            script += "precmd_functions=(${precmd_functions:#__nmbra_prompt_precmd})\n"
+            script += "precmd_functions=(__nmbra_prompt_precmd $precmd_functions)\n"
+        }
+        script += "setopt prompt_subst\n"
+        // Single quotes carry the prompt verbatim: it contains `%` and `$` that
+        // must reach zsh untouched, and no style's prompt contains a single quote.
+        script += "PROMPT='\(zsh.prompt)'\n"
+        if !zsh.rightPrompt.isEmpty {
+            script += "RPROMPT='\(zsh.rightPrompt)'\n"
+        }
+        let file = Configuration.supportDirectory.appendingPathComponent("prompt.zsh")
+        do {
+            try FileManager.default.createDirectory(at: Configuration.supportDirectory,
+                                                  withIntermediateDirectories: true)
+            try script.write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            return nil
+        }
+        return " source '\(file.path)'\n"
+    }
+
     /// Ask the window for its title.
     ///
     /// Called on every screen update, by any tab, whether or not it is the one

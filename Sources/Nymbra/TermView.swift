@@ -592,6 +592,14 @@ final class TermView: NSView {
 
     /// Cmd+V. Wrapped in the bracketed-paste guards when the program asked for
     /// them, so a paste is not read as typing.
+    @objc func copySelection(_ sender: Any?) {
+        _ = copySelectionToPasteboard()
+    }
+
+    @objc func selectAllText(_ sender: Any?) {
+        selectEverything()
+    }
+
     @objc func paste(_ sender: Any?) {
         guard let text = NSPasteboard.general.string(forType: .string) else { return }
         var bytes = Array(text.utf8)
@@ -746,7 +754,11 @@ final class TermView: NSView {
             sendMouseReport(for: event)
             return
         }
-        // Right-click without mouse reporting does nothing by default.
+        // A right-click that no program claimed belongs to the person: show the
+        // clipboard menu rather than swallowing the click.
+        if let menu = self.menu(for: event) {
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+        }
     }
 
     override func rightMouseUp(with event: NSEvent) {
@@ -812,6 +824,41 @@ final class TermView: NSView {
     /// Paste, wrapped in the bracketed-paste guards when the program asked for
     /// them, so a paste is not read as typing. Newlines become carriage returns,
     /// which is what a line editor expects from a paste.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        // A program that asked for the mouse keeps right-click for itself. When
+        // nobody asked, the click belongs to the person, and a small menu is the
+        // least a terminal can offer.
+        guard screen.mouseMode == .off else { return nil }
+        let menu = NSMenu()
+        let copyItem = NSMenuItem(title: "Copy", action: #selector(copySelection(_:)), keyEquivalent: "")
+        copyItem.target = self
+        copyItem.isEnabled = selection != nil
+        menu.addItem(copyItem)
+        let pasteItem = NSMenuItem(title: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+        pasteItem.target = self
+        menu.addItem(pasteItem)
+        let selectAllItem = NSMenuItem(title: "Select All", action: #selector(selectAllText(_:)), keyEquivalent: "")
+        selectAllItem.target = self
+        menu.addItem(selectAllItem)
+        let controller = (NSApp.delegate as? AppDelegate)?.controller
+        if let controller {
+            let clearItem = NSMenuItem(title: "Clear", action: #selector(AppController.clearBuffer(_:)), keyEquivalent: "")
+            clearItem.target = controller
+            menu.addItem(clearItem)
+            menu.addItem(NSMenuItem.separator())
+            let newTabItem = NSMenuItem(title: "New Tab", action: #selector(AppController.newTab(_:)), keyEquivalent: "")
+            newTabItem.target = controller
+            menu.addItem(newTabItem)
+            let splitRightItem = NSMenuItem(title: "Split Right", action: #selector(AppController.splitRight(_:)), keyEquivalent: "")
+            splitRightItem.target = controller
+            menu.addItem(splitRightItem)
+            let splitDownItem = NSMenuItem(title: "Split Down", action: #selector(AppController.splitDown(_:)), keyEquivalent: "")
+            splitDownItem.target = controller
+            menu.addItem(splitDownItem)
+        }
+        return menu
+    }
+
     func pasteFromPasteboard() {
         guard let text = NSPasteboard.general.string(forType: .string) else { return }
         var bytes = Array(text.utf8)

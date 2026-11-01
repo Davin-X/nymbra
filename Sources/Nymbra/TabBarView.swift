@@ -8,8 +8,16 @@ import AppKit
 /// centres its items, has no close button, offers no menu per item, and gives no
 /// way to ask where an item is — the three things the concept asks of a tab strip.
 final class TabChipView: NSView {
+    private let iconField = NSTextField(labelWithString: "›_")
     private let titleField = NSTextField(labelWithString: "")
+    private let unreadDot = NSView()
     private let closeButton = NSButton()
+
+    /// Whether this tab has output the person has not seen. Drives the dot
+    /// beside the name; the label keeps its own mark for compatibility.
+    var isUnread: Bool = false {
+        didSet { unreadDot.isHidden = !isUnread; needsDisplay = true }
+    }
 
     /// The tab's name, exactly as the window composed it — including the dot, so
     /// that what is asserted is what is drawn.
@@ -17,6 +25,10 @@ final class TabChipView: NSView {
         didSet {
             titleField.stringValue = title
             titleField.setAccessibilityLabel(title)
+            // A truncated name is still a name a person can read in full by
+            // hovering, rather than a guess.
+            toolTip = title
+            titleField.toolTip = title
             needsLayout = true
         }
     }
@@ -25,6 +37,7 @@ final class TabChipView: NSView {
         didSet {
             titleField.textColor = isSelected ? .labelColor : .secondaryLabelColor
             closeButton.isHidden = !(isSelected || hovered)
+            closeButton.contentTintColor = (isSelected || hovered) ? .labelColor : .secondaryLabelColor
             needsDisplay = true
         }
     }
@@ -43,6 +56,7 @@ final class TabChipView: NSView {
     private var hovered = false {
         didSet {
             closeButton.isHidden = !(isSelected || hovered)
+            closeButton.contentTintColor = (isSelected || hovered) ? .labelColor : .secondaryLabelColor
             needsDisplay = true
         }
     }
@@ -53,20 +67,35 @@ final class TabChipView: NSView {
     /// clamped so that one long title cannot take the whole strip.
     var desiredWidth: CGFloat {
         let text = titleField.intrinsicContentSize.width
-        return min(max(text + 54, TabBarView.chipMinimumWidth), TabBarView.chipMaximumWidth)
+        let icon = iconField.intrinsicContentSize.width
+        return min(max(text + icon + 76, TabBarView.chipMinimumWidth), TabBarView.chipMaximumWidth)
     }
 
     init() {
         super.init(frame: .zero)
         wantsLayer = true
 
-        titleField.font = .systemFont(ofSize: 12)
+        iconField.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+        iconField.textColor = .tertiaryLabelColor
+        iconField.translatesAutoresizingMaskIntoConstraints = false
+        iconField.setContentHuggingPriority(.required, for: .horizontal)
+        addSubview(iconField)
+
+        titleField.font = .systemFont(ofSize: 13)
         titleField.textColor = .secondaryLabelColor
         titleField.lineBreakMode = .byTruncatingTail
         titleField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleField)
 
-        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close tab")
+        unreadDot.wantsLayer = true
+        unreadDot.layer?.backgroundColor = NSColor.systemYellow.cgColor
+        unreadDot.layer?.cornerRadius = 3
+        unreadDot.isHidden = true
+        unreadDot.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(unreadDot)
+
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close tab")?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
         closeButton.imagePosition = .imageOnly
         closeButton.isBordered = false
         closeButton.contentTintColor = .secondaryLabelColor
@@ -78,10 +107,16 @@ final class TabChipView: NSView {
         addSubview(closeButton)
 
         NSLayoutConstraint.activate([
-            titleField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+            iconField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            iconField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleField.leadingAnchor.constraint(equalTo: iconField.trailingAnchor, constant: 4),
             titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleField.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor,
+            titleField.trailingAnchor.constraint(lessThanOrEqualTo: unreadDot.leadingAnchor,
                                                  constant: -4),
+            unreadDot.widthAnchor.constraint(equalToConstant: 6),
+            unreadDot.heightAnchor.constraint(equalToConstant: 6),
+            unreadDot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            unreadDot.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6),
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
             closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             closeButton.widthAnchor.constraint(equalToConstant: 18),
@@ -117,6 +152,13 @@ final class TabChipView: NSView {
     override func mouseExited(with event: NSEvent) { hovered = false }
 
     override func mouseDown(with event: NSEvent) {
+        // A middle click closes the tab under the pointer, the way a browser
+        // does: the `×` is the obvious control, but the wheel click is the one
+        // a person's hand is already on when they are tidying up.
+        if event.buttonNumber == 2 {
+            onClose?()
+            return
+        }
         onSelect?()
     }
 
@@ -150,6 +192,9 @@ final class TabChipView: NSView {
 /// The strip along the top of a window: one chip per tab, laid out from the left,
 /// and a `+` that follows the last of them.
 ///
+/// When there are more tabs than fit, the strip scrolls horizontally. The `+`
+/// button stays fixed at the right edge so it is always reachable.
+///
 /// Laid out by hand rather than by a stack view, because the order and the place
 /// of every chip is the whole of what this view is: tabs read left to right in the
 /// order they were opened, the `+` is always the last thing in the row rather than
@@ -174,6 +219,11 @@ final class TabBarView: NSVisualEffectView {
 
         /// The label as drawn, dot included. Read off the chip so the strip cannot
         /// say one thing and draw another.
+        var isUnread: Bool {
+            get { chip.isUnread }
+            set { chip.isUnread = newValue }
+        }
+
         var label: String {
             get { chip.title }
             set {
@@ -187,12 +237,21 @@ final class TabBarView: NSVisualEffectView {
     static let chipMaximumWidth: CGFloat = 220
     private static let chipGap: CGFloat = 4
     private static let leadingInset: CGFloat = 8
-    private static let plusWidth: CGFloat = 26
+    private static let plusWidth: CGFloat = 30
+    private static let scrollViewHeight: CGFloat = 28  // height of the scrollable chip area
 
     private(set) var tabs: [Tab] = []
     /// The item in the strip that is not a tab. It is a button and never a
     /// selection: pressing it makes a tab instead of showing one.
     let plusButton = NSButton()
+
+    // Scroll view for horizontal scrolling of chips
+    private let scrollView = NSScrollView()
+    private let chipContainer = NSView()
+
+    // Fixed tab count, so a crowded strip still says how many tabs are open.
+    private let tabCounterLabel = NSTextField(labelWithString: "0 tabs")
+    private var scrollViewTrailingConstraint: NSLayoutConstraint!
 
     private(set) var selectedID: TabID?
 
@@ -208,10 +267,36 @@ final class TabBarView: NSVisualEffectView {
         blendingMode = .withinWindow
         state = .followsWindowActiveState
         wantsLayer = true
-        layer?.masksToBounds = true
+        // Don't clip the whole view — we clip via the scroll view
+        layer?.masksToBounds = false
         setAccessibilityLabel("Tabs")
 
-        plusButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New tab")
+        // Configure scroll view for horizontal scrolling
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = true
+        scrollView.horizontalScroller = NSScroller()
+        scrollView.horizontalScrollElasticity = .none
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.documentView = chipContainer
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(scrollView)
+
+        // Chip container holds the tab chips
+        chipContainer.translatesAutoresizingMaskIntoConstraints = false
+        chipContainer.wantsLayer = true
+
+        // Plus button fixed at the right edge
+        plusButton.translatesAutoresizingMaskIntoConstraints = false
+        plusButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New tab")?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
+
+        // Tab counter: fixed, so it is not scrolled away with the chips.
+        tabCounterLabel.font = .systemFont(ofSize: 10, weight: .medium)
+        tabCounterLabel.textColor = .secondaryLabelColor
+        tabCounterLabel.alignment = .center
+        tabCounterLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(tabCounterLabel)
         plusButton.imagePosition = .imageOnly
         plusButton.isBordered = false
         plusButton.contentTintColor = .secondaryLabelColor
@@ -220,6 +305,32 @@ final class TabBarView: NSVisualEffectView {
         plusButton.action = #selector(addPressed(_:))
         plusButton.toolTip = "New tab"
         addSubview(plusButton)
+
+        // Layout constraints
+        scrollViewTrailingConstraint = scrollView.trailingAnchor.constraint(
+            equalTo: trailingAnchor, constant: -(TabBarView.plusWidth + 52))
+        NSLayoutConstraint.activate([
+            // Scroll view fills the strip vertically, takes the width minus the
+            // plus button and the tab counter.
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: TabBarView.leadingInset),
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scrollViewTrailingConstraint,
+
+            // Chip container: fixed height, leading/top aligned to the content view.
+            chipContainer.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            chipContainer.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            chipContainer.heightAnchor.constraint(equalToConstant: TabBarView.scrollViewHeight),
+
+            // Plus button fixed at right edge
+            plusButton.widthAnchor.constraint(equalToConstant: TabBarView.plusWidth),
+            plusButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            plusButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        // Trackpad/mouse wheel scrolling - on macOS the scroll view handles this natively
+        // The NSScrollView with autohidesScrollers and horizontalScroller handles trackpad
+        // scrolling automatically. No gesture recognizer needed.
     }
 
     @available(*, unavailable)
@@ -235,10 +346,11 @@ final class TabBarView: NSVisualEffectView {
     func insert(_ tab: Tab, at index: Int) {
         let place = min(max(index, 0), tabs.count)
         tabs.insert(tab, at: place)
+        updateTabCounter()
         tab.chip.onSelect = { [weak self] in self?.selectAndTell(tab.identifier) }
         tab.chip.onDrop = { [weak self] point in
             guard let self else { return }
-            let barPoint = tab.chip.convert(point, to: self)
+            let barPoint = tab.chip.convert(point, to: self.chipContainer)
             self.onReorder?(tab.identifier, self.insertionIndex(for: barPoint.x))
         }
         tab.chip.onMenu = { [weak self] point in
@@ -246,7 +358,7 @@ final class TabBarView: NSVisualEffectView {
             self.onMenu?(tab.identifier, tab.chip.convert(point, to: self))
         }
         tab.chip.onClose = { [weak self] in self?.onClose?(tab.identifier) }
-        addSubview(tab.chip, positioned: .below, relativeTo: plusButton)
+        chipContainer.addSubview(tab.chip, positioned: .below, relativeTo: nil)
         needsLayout = true
     }
 
@@ -257,6 +369,7 @@ final class TabBarView: NSVisualEffectView {
         tabs[index].chip.removeFromSuperview()
         tabs.remove(at: index)
         if selectedID == id { selectedID = nil }
+        updateTabCounter()
         needsLayout = true
         return index
     }
@@ -305,37 +418,67 @@ final class TabBarView: NSVisualEffectView {
     // MARK: - Where everything is
 
     /// Where each chip is, in the strip's coordinates, in tab order.
-    var chipFrames: [NSRect] { tabs.map(\.chip.frame) }
+    ///
+    /// The chips live in the chipContainer, which is the scroll view's documentView.
+    /// We convert their frames from the chipContainer's coordinate space to the
+    /// TabBarView's coordinate space so that tests (and drag/drop) work with the
+    /// strip's own coordinates.
+    var chipFrames: [NSRect] {
+        tabs.map { tab in
+            let frameInContainer = tab.chip.frame
+            return chipContainer.convert(frameInContainer, to: self)
+        }
+    }
 
     /// Where the `+` is.
     var plusFrame: NSRect { plusButton.frame }
 
+    /// Where the tab counter is.
+    var tabCounterFrame: NSRect { tabCounterLabel.frame }
+
+    private func updateTabCounter() {
+        let count = tabs.count
+        tabCounterLabel.stringValue = count == 1 ? "1 tab" : "\(count) tabs"
+        needsLayout = true
+    }
+
     override func layout() {
+        // Leave room for the counter between the scroll view and the plus button.
+        let counterWidth = max(tabCounterLabel.intrinsicContentSize.width + 10, 44)
+        scrollViewTrailingConstraint.constant = -(TabBarView.plusWidth + counterWidth + 12)
+
         super.layout()
-        let height = max(bounds.height - 8, 1)
-        let y = (bounds.height - height) / 2
+        let y: CGFloat = 1
 
-        // Squeezed to fit rather than allowed to run past the `+`: a strip that
-        // pushed its own button off the edge would hide the one control that makes
-        // another tab. Past the minimum the chips stop shrinking and are clipped by
-        // the strip instead — a tab nobody can read is still a tab, and one that is
-        // not drawn at all is not. See the roadmap's note on a scrolling strip.
-        let available = bounds.width - TabBarView.leadingInset - TabBarView.plusWidth - 8
+        // Layout chips in the container. The scroll view already provides the
+        // leading inset, so chips start at x=0 within the container.
         let wanted = tabs.map(\.chip.desiredWidth)
-        let total = wanted.reduce(0, +) + CGFloat(max(tabs.count - 1, 0)) * TabBarView.chipGap
-        let squeeze = total > available && total > 0 ? available / total : 1
 
-        var x = TabBarView.leadingInset
+        var x: CGFloat = 0
         for (index, tab) in tabs.enumerated() {
-            let width = max(wanted[index] * squeeze, TabBarView.chipMinimumWidth)
-            tab.chip.frame = NSRect(x: x, y: y, width: width, height: height)
+            let width = max(wanted[index], TabBarView.chipMinimumWidth)
+            tab.chip.frame = NSRect(x: x, y: y, width: width, height: TabBarView.scrollViewHeight)
             x += width + TabBarView.chipGap
         }
 
-        // The `+` follows the last tab, and stays inside the strip even when the
-        // tabs have filled it.
-        let plusX = min(x + 2, bounds.width - TabBarView.plusWidth - 6)
-        plusButton.frame = NSRect(x: max(plusX, TabBarView.leadingInset),
-                                  y: y, width: TabBarView.plusWidth, height: height)
+        // Update chip container width to match content
+        chipContainer.frame.size.width = max(x, chipContainer.bounds.width)
+
+        // Position the plus button directly — its frame is set here rather than
+        // via a height constraint because NSButton's intrinsic content size for
+        // the "plus" symbol (31.5pt) conflicts with the 28pt strip height.
+        plusButton.frame = NSRect(x: bounds.width - TabBarView.plusWidth - 6,
+                                  y: 1,
+                                  width: TabBarView.plusWidth,
+                                  height: TabBarView.scrollViewHeight)
+
+        // Position the tab counter just to the left of the plus button.
+        let counterX = plusButton.frame.minX - counterWidth - 4
+        tabCounterLabel.frame = NSRect(x: counterX, y: 1,
+                                      width: counterWidth, height: TabBarView.scrollViewHeight)
     }
+
+// MARK: - Scrolling
+    // Trackpad and mouse wheel scrolling are handled natively by NSScrollView.
+    // The horizontal scroller appears automatically when chips overflow.
 }

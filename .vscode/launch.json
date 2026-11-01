@@ -39,6 +39,26 @@
             "target": "NymbraCheck",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release NymbraCheck"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nymbra}",
+            "name": "Debug NymbraSpawn",
+            "target": "NymbraSpawn",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug NymbraSpawn"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:nymbra}",
+            "name": "Release NymbraSpawn",
+            "target": "NymbraSpawn",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release NymbraSpawn"
         }
     ]
 }

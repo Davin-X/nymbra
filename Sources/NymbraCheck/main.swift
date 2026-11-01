@@ -19,5 +19,6 @@ selectionSuite(harness)
 shortcutSuite(harness)
 ptySuite(harness)
 paneLayoutSuite(harness)
+promptStyleSuite(harness)
 
 exit(harness.report())
