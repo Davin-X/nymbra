@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `make dmg` builds `build/Nymbra.dmg`, a disk image with the app beside an
+  Applications shortcut, using only `hdiutil`. The 0.1.0 release now offers it
+  alongside the zip.
+
 ## [0.1.0] — 2026-11-14
 
 The first pre-release. **Unsigned**: on first launch, right-click the app and
