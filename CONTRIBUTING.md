@@ -33,9 +33,43 @@ not, that is a bug — please report it.
 | `make build` | Release build |
 | `make lint` | Run SwiftLint (`brew install swiftlint`) |
 | `make test` | Test harness (`NymbraCheck`) |
-| `make pty-test` | Headless proof that a login shell runs on a PTY |
+| `make app` | Build `build/Nymbra.app`, icon included |
+| `make launch` | Build the bundle and open it |
+| `make install` | Copy the bundle to `/Applications` (or `~/Applications`) |
+| `make dist` | Zip the bundle as `build/Nymbra.zip` |
 | `make check` | Everything CI runs — lint, build, tests, headless proofs |
 | `make clean` | Remove build output |
+
+### Headless proofs
+
+Each one starts the real app without a person in front of it and asserts what
+somebody would otherwise check by eye. `make check` runs them all.
+
+| Command | Proves |
+|---|---|
+| `make pty-test` | A login shell runs on a PTY |
+| `make screen-test` | Real output fed through the parser leaves the expected screen |
+| `make resize-test` | The view and the shell agree on the grid, and no size is not a size |
+| `make window-test` | Closing a window gives a working shell back, and the floor under the window is right |
+| `make tabs-test` | The strip's geometry, per-tab close buttons, reordering, and independent shells |
+| `make location-test` | Tab and window titles follow the shell's folder and foreground program, and the path bar says so |
+| `make input-test` | Input methods compose before they commit, and synchronized output holds a frame |
+| `make palette-test` | The command palette, driven with real key events |
+| `make find-test` | Find options, the highlight the view draws, and a current match that looks different |
+| `make settings-test` | The settings window, the prompt gallery redrawing the preview, and the shortcut recorder's rules |
+| `make mouse-test` | Mouse reporting bytes |
+| `make shell-integration-test` | A real zsh, reporting what it is doing |
+| `make notify-test` | A long command in a background tab, announced |
+
+The binary also prints what a test runner cannot look at, so it can be asserted
+in text:
+
+| Flag | Prints |
+|---|---|
+| `--screen-test "<cmd>"` | The screen after running `<cmd>` in a real shell |
+| `--screen-debug "<cmd>"` | The same screen with blanks shown as `·` |
+| `--theme-test` | Every preset, and the contrast of every colour in it |
+| `--menu-test` | The menu bar and its key equivalents |
 
 ## The architecture rule
 
