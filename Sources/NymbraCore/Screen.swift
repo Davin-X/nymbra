@@ -145,9 +145,17 @@ public final class Screen {
     public var mouseEncoding: MouseEncoding = .x10
     public var reverseVideo = false
     public var title = ""
+    /// The working directory the shell last reported with `OSC 7`, as a path.
+    /// Preferred over asking the OS, because it is the only answer that is right
+    /// inside `ssh`: the remote shell says where it is, the local process can't.
+    public var reportedDirectory: String?
 
     public private(set) var altScreenActive = false
-    public private(set) var scrollback: [[Cell]] = []
+    /// DEC mode 2026: the program is in the middle of a frame. The renderer
+    /// holds the last complete picture until the mode is reset, so an editor
+    /// redrawing a screen never shows half of the old one and half of the new.
+    public private(set) var synchronizedOutput = false
+    public private(set) var scrollback = Scrollback()
     /// Whether each row was broken by the terminal itself (a soft wrap) rather
     /// than by a line feed. A soft-wrapped row is a continuation of the one
     /// above it, which is what makes reflow on resize possible: the rows
@@ -376,10 +384,7 @@ public final class Screen {
         let capture = scrollTop == 0 && scrollBottom == rows - 1 && !altScreenActive
         for _ in 0..<lines {
             if capture {
-                scrollback.append(Array(grid[0..<cols]))
-                if scrollback.count > scrollbackLimit {
-                    scrollback.removeFirst(scrollback.count - scrollbackLimit)
-                }
+                scrollback.append(Array(grid[0..<cols]), limit: scrollbackLimit)
             }
             for row in scrollTop..<scrollBottom {
                 let source = (row + 1) * cols
@@ -632,7 +637,31 @@ public final class Screen {
         case 1006: mouseEncoding = enabled ? .sgr : .x10
         case 1015: break                     // urxvt encoding: accepted, unused
         case 2004: bracketedPaste = enabled
+        case 2026: synchronizedOutput = enabled
         default: break
+        }
+    }
+
+    /// DECRQM's answer for a private mode: `1` set, `2` reset, `0` a mode this
+    /// terminal does not know. Programs ask before relying on a mode — Neovim
+    /// asks about 2026 — so "not recognised" has to be an honest answer.
+    public func privateModeState(_ mode: Int) -> Int {
+        func state(_ on: Bool) -> Int { on ? 1 : 2 }
+        switch mode {
+        case 1: return state(applicationCursorKeys)
+        case 5: return state(reverseVideo)
+        case 6: return state(originMode)
+        case 7: return state(autoWrap)
+        case 25: return state(cursor.visible)
+        case 47, 1047, 1049: return state(altScreenActive)
+        case 1000: return state(mouseMode == .click)
+        case 1002: return state(mouseMode == .drag)
+        case 1003: return state(mouseMode == .motion)
+        case 1004: return state(focusReporting)
+        case 1006: return state(mouseEncoding == .sgr)
+        case 2004: return state(bracketedPaste)
+        case 2026: return state(synchronizedOutput)
+        default: return 0
         }
     }
 
@@ -849,6 +878,7 @@ public final class Screen {
         applicationKeypad = false
         bracketedPaste = false
         focusReporting = false
+        synchronizedOutput = false
         mouseMode = .off
         mouseEncoding = .x10
         reverseVideo = false
@@ -946,10 +976,14 @@ public final class Screen {
         if stops.count < c { stops.append(contentsOf: Array(repeating: false, count: c - stops.count)) }
         tabStops = stops
 
-        if scrollBottom >= r {
-            scrollTop = 0
-            scrollBottom = r - 1
-        }
+        // A resize resets the scroll region to the whole screen, as xterm does.
+        // Keeping the old bottom margin when the screen grows leaves the rows
+        // below it outside the region: line feeds then scroll a strip that is
+        // shorter than the screen, and since that is not a whole-screen scroll,
+        // nothing ever reaches the scrollback again. A program that wants a
+        // region sets it again after SIGWINCH.
+        scrollTop = 0
+        scrollBottom = r - 1
         cursor.row = min(cursor.row, r - 1)
         cursor.col = min(cursor.col, c - 1)
         cursor.pendingWrap = false
@@ -995,10 +1029,14 @@ public final class Screen {
         var stops = Array(tabStops.prefix(c))
         if stops.count < c { stops.append(contentsOf: Array(repeating: false, count: c - stops.count)) }
         tabStops = stops
-        if scrollBottom >= r {
-            scrollTop = 0
-            scrollBottom = r - 1
-        }
+        // A resize resets the scroll region to the whole screen, as xterm does.
+        // Keeping the old bottom margin when the screen grows leaves the rows
+        // below it outside the region: line feeds then scroll a strip that is
+        // shorter than the screen, and since that is not a whole-screen scroll,
+        // nothing ever reaches the scrollback again. A program that wants a
+        // region sets it again after SIGWINCH.
+        scrollTop = 0
+        scrollBottom = r - 1
         cursor.row = min(cursor.row, r - 1)
         cursor.col = min(cursor.col, c - 1)
         cursor.pendingWrap = false
@@ -1065,17 +1103,32 @@ public final class Screen {
     /// one set of tests. `scrollOffset` is clamped, so a viewport cannot be
     /// scrolled past the oldest line held.
     ///
-    /// This allocates per call, which is fine for the CoreText renderer of this
-    /// milestone and is one of the things Metal replaces.
+    /// Only the rows on screen are copied: scrolled back by one line into a
+    /// ten-thousand-line history, this is `rows` lines of work, not ten thousand.
     public func displayRows(scrollOffset: Int) -> [[Cell]] {
-        let live = (0..<rows).map { row in
-            Array(grid[(row * cols)..<((row + 1) * cols)])
-        }
-        guard scrollOffset > 0, !scrollback.isEmpty else { return live }
-
-        let combined = scrollback + live
         let first = viewportFirstRow(scrollOffset: scrollOffset)
-        return Array(combined[first..<Swift.min(first + rows, combined.count)])
+        let history = scrollback.count
+        return (first..<(first + rows)).map { absolute in
+            if absolute < history { return scrollback[absolute] }
+            let row = absolute - history
+            return Array(grid[(row * cols)..<((row + 1) * cols)])
+        }
+    }
+
+    /// Where a viewport that was `scrollOffset` lines up into history should be
+    /// once `linesAppended` more lines have entered the scrollback, so it keeps
+    /// showing the same lines.
+    ///
+    /// `scrollOffset` counts up from the live screen, so standing still means
+    /// moving up by exactly the lines appended — whether the history grew, or
+    /// was full and dropped its oldest to make room. The live screen (offset 0)
+    /// stays live: following output is what it is for. Clamped, so a history
+    /// that was cleared or shrunk underneath cannot leave the viewport past it.
+    public static func pinnedScrollOffset(_ scrollOffset: Int,
+                                          linesAppended: Int,
+                                          historyCount: Int) -> Int {
+        guard scrollOffset > 0 else { return 0 }
+        return Swift.min(scrollOffset + Swift.max(0, linesAppended), historyCount)
     }
 
     /// The absolute row of the scrollback-plus-live screen that the viewport's

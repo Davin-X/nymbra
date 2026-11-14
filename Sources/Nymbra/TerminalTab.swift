@@ -27,14 +27,29 @@ final class TerminalTab {
         didSet { host?.refreshTitle() }
     }
 
-    /// The name this tab is known by, in the strip and anywhere else.
-    var displayName: String {
-        if let customTitle, !customTitle.isEmpty { return customTitle }
-        let title = panes[focusedPane]?.title ?? ""
-        return title.isEmpty ? "Nymbra" : title
+    /// What is known about the focused pane's shell: what it is running,
+    /// where, and what anything has asked to call it. See `TerminalTitle`.
+    var titleFacts: TerminalTitle.Facts {
+        let pane = panes[focusedPane]
+        return TerminalTitle.Facts(customTitle: customTitle,
+                                   programTitle: pane?.title ?? "",
+                                   foregroundProgram: pane?.terminal.foregroundProgram,
+                                   directory: pane?.terminal.currentDirectory,
+                                   shellPath: pane?.terminal.shellPath)
     }
 
-    init(configuration: Configuration) throws {
+    /// The name this tab is known by, in the strip and anywhere else: the
+    /// folder or the running program, never the application's name.
+    var displayName: String { TerminalTitle.tabName(titleFacts) }
+
+    /// Where the focused pane's shell is, for a new tab or split to start in.
+    var currentDirectory: String? { panes[focusedPane]?.terminal.currentDirectory }
+
+    /// The directory the first shell starts in; `nil` is the default.
+    private let initialDirectory: String?
+
+    init(configuration: Configuration, workingDirectory: String? = nil) throws {
+        self.initialDirectory = workingDirectory
         self.configuration = configuration
         let first = TerminalTab.firstPane
         self.layout = PaneLayout(first)
@@ -46,7 +61,7 @@ final class TerminalTab {
         container.onDividerMoved = { [weak self] divider, position in
             self?.moveDivider(divider, to: position)
         }
-        let firstPane = try makePane(id: first)
+        let firstPane = try makePane(id: first, workingDirectory: initialDirectory)
         panes[first] = firstPane
         applyLayout()
         firstPane.terminal.resize(firstPane.view.grid)
@@ -54,14 +69,15 @@ final class TerminalTab {
         updateTitle()
     }
 
-    private func makePane(id: PaneID) throws -> Pane {
+    private func makePane(id: PaneID, workingDirectory: String? = nil) throws -> Pane {
         // The integration is asked for here, once per shell, rather than held
         // on the tab: it is the environment the shell is born with, and a shell
         // already running cannot be given a new one. A settings change therefore
         // reaches panes and tabs opened after it.
         let terminal = try Terminal(size: GridSize(rows: 24, cols: 80),
                                     shell: configuration.shell.path,
-                                    integration: configuration.shellIntegration())
+                                    integration: configuration.shellIntegration(),
+                                    workingDirectory: workingDirectory)
         let view = TermView(frame: container.bounds,
                             screen: terminal.screen,
                             configuration: configuration)
@@ -89,7 +105,7 @@ final class TerminalTab {
         }
         terminal.onUpdate = { [weak self, weak view] in
             guard let view else { return }
-            view.needsDisplay = true
+            view.screenDidUpdate()
             self?.updateTitle()
             self?.noteOutput()
         }
@@ -109,7 +125,8 @@ final class TerminalTab {
         nextPaneID += 1
         let pane: Pane
         do {
-            pane = try makePane(id: id)
+            // A split starts where the pane it splits is, the way a new tab does.
+            pane = try makePane(id: id, workingDirectory: currentDirectory)
         } catch {
             onSpawnFailure?(error)
             return false
@@ -198,6 +215,63 @@ final class TerminalTab {
         self.configuration = configuration
         container.dividerColour = Theme(configuration).divider
         for pane in panes.values { pane.view.apply(configuration) }
+    }
+
+    /// Hand a chosen prompt to shells that are already running in this tab.
+    ///
+    /// A new shell picks its prompt up from the environment it is born with, but
+    /// one that is already alive has to be told. The assignment travels as a
+    /// base64-encoded script so the prompt's own `%` and `$` cannot be read as
+    /// shell syntax on the way through, and it is only sent to a pane whose
+    /// shell is at its own prompt — interrupting a running command with a
+    /// settings change would be worse than leaving the prompt alone.
+    func applyPromptStyle(_ configuration: Configuration) {
+        guard configuration.appearance.promptStyleApplied else { return }
+        guard (configuration.shell.path ?? "").contains("zsh")
+                || configuration.shell.path == nil else { return }
+        guard let command = Self.promptApplyCommand(style: PromptStyle(stored: configuration.appearance.promptStyle),
+                                                   palette: Palette(preset: configuration.colours.preset,
+                                                                    overrides: configuration.colours.overrides))
+        else { return }
+        for pane in panes.values where !pane.terminal.hasForegroundJob {
+            pane.terminal.sendSilently(command)
+        }
+    }
+
+    private static func promptApplyCommand(style: PromptStyle, palette: Palette) -> String? {
+        let zsh = style.zshPrompt(palette: palette)
+        var script = ""
+        if zsh.usesBranch {
+            script += "typeset -g __nmbra_branch=''\n"
+            script += "function __nmbra_prompt_precmd() {\n"
+            script += "  case \"$PWD\" in\n"
+            script += "    \"$HOME/Documents\"|\"$HOME/Documents\"/*|\"$HOME/Desktop\"|\"$HOME/Desktop\"/*|\"$HOME/Downloads\"|\"$HOME/Downloads\"/*)\n"
+            script += "      __nmbra_branch=''\n"
+            script += "      ;;\n"
+            script += "    *)\n"
+            script += "      __nmbra_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)\n"
+            script += "      ;;\n"
+            script += "  esac\n"
+            script += "}\n"
+            script += "precmd_functions=(${precmd_functions:#__nmbra_prompt_precmd})\n"
+            script += "precmd_functions=(__nmbra_prompt_precmd $precmd_functions)\n"
+        }
+        script += "setopt prompt_subst\n"
+        // Single quotes carry the prompt verbatim: it contains `%` and `$` that
+        // must reach zsh untouched, and no style's prompt contains a single quote.
+        script += "PROMPT='\(zsh.prompt)'\n"
+        if !zsh.rightPrompt.isEmpty {
+            script += "RPROMPT='\(zsh.rightPrompt)'\n"
+        }
+        let file = Configuration.supportDirectory.appendingPathComponent("prompt.zsh")
+        do {
+            try FileManager.default.createDirectory(at: Configuration.supportDirectory,
+                                                  withIntermediateDirectories: true)
+            try script.write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            return nil
+        }
+        return " source '\(file.path)'\n"
     }
 
     /// Ask the window for its title.

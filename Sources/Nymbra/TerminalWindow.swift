@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import NymbraCore
+import NymbraInput
 import UserNotifications
 
 /// One window: a set of tabs, each with its own layout of panes.
@@ -22,7 +23,19 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     /// fourth.
     private let paneHost = NSView()
     private let contentView = NSView()
-    private let findBar = NSVisualEffectView()
+    /// Where the shell is and what it is doing, under the tabs.
+    let pathBar = PathBarView()
+    /// The search, more and settings buttons at the right of the title bar.
+    private let titlebarAccessory = NSTitlebarAccessoryViewController()
+    /// Re-reads the folder and program of the tab in front. A program that
+    /// starts without printing (`sleep 60`) changes nothing on screen, so the
+    /// title would not otherwise notice it.
+    private var titleTimer: Timer?
+
+    /// Run an application command — what the title bar's buttons and the path
+    /// bar's hint do. Set by the controller, which owns the commands.
+    var onCommand: ((Command) -> Void)?
+    private let findBar = FindBarView()
     private let findSearchField = NSSearchField()
     private let findCaseButton = NSButton()
     private let findWordButton = NSButton()
@@ -43,6 +56,10 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     /// about the person's attention: a tab is unread only relative to the one
     /// they are looking at, and only the window knows which that is.
     private var unread: Set<TabID> = []
+
+    /// Commands that finished out of sight and may need the person's attention.
+    /// Bounded and local: a short list, not a notification history.
+    private(set) var attentionInbox = AttentionInbox(limit: 3)
 
     private static let firstTab = TabID(0)
 
@@ -76,7 +93,10 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         self.tabBar = TabBarView()
         self.window = NSWindow(
             contentRect: frame,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            // Full-size content under a transparent title bar: the title bar, the
+            // strip and the path bar are one surface, not a system bar on top
+            // of an app bar.
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -84,6 +104,8 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
 
         window.delegate = self
         window.title = "Nymbra"
+        window.titlebarAppearsTransparent = true
+        contentView.wantsLayer = true
         window.contentView = contentView
         window.setContentSize(frame.size)
         window.center()
@@ -94,9 +116,13 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         window.contentMinSize = NSSize(width: 420, height: 260)
 
         contentView.addSubview(tabBar)
+        contentView.addSubview(pathBar)
         contentView.addSubview(paneHost)
         tabBar.translatesAutoresizingMaskIntoConstraints = false
+        pathBar.translatesAutoresizingMaskIntoConstraints = false
         paneHost.translatesAutoresizingMaskIntoConstraints = false
+        // Under the title bar, which the content now extends beneath.
+        let top = (window.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? contentView.topAnchor
         NSLayoutConstraint.activate([
             // The strip takes the top edge, and the terminal takes everything
             // below it — to the left, right and bottom edges of the window. A
@@ -104,14 +130,29 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
             // terminal with less room than the window has.
             tabBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             tabBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            tabBar.topAnchor.constraint(equalTo: contentView.topAnchor),
+            tabBar.topAnchor.constraint(equalTo: top),
             tabBar.heightAnchor.constraint(equalToConstant: 30),
+            pathBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            pathBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            pathBar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            pathBar.heightAnchor.constraint(equalToConstant: PathBarView.height),
             paneHost.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             paneHost.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             paneHost.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            paneHost.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            paneHost.topAnchor.constraint(equalTo: pathBar.bottomAnchor),
         ])
         configureFindBar()
+        configureTitlebar()
+        updateNewTabTooltip()
+        applyChrome()
+        pathBar.onRevealPath = { path in
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+        }
+        pathBar.onCommandPalette = { [weak self] in self?.onCommand?(.commandPalette) }
+        titleTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self, self.window.isVisible else { return }
+            self.refreshTitle()
+        }
 
         // A window that will not be a tab of somebody else's window. Nymbra's tabs
         // are inside it (see the note in `main.swift`); the system's would be a
@@ -126,6 +167,15 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         tabBar.onAdd = { [weak self] in _ = self?.newTab() }
         tabBar.onReorder = { [weak self] id, index in self?.reorderTab(id, to: index) }
         tabBar.onMenu = { [weak self] id, point in self?.showTabMenu(for: id, at: point) }
+        tabBar.onAttention = { [weak self] in self?.showAttentionMenu() }
+
+        // Double-clicking the strip toggles the window between its resting size
+        // and a zoomed one, so the top bar is a quick handle for making room
+        // and getting it back.
+        let doubleClick = NSClickGestureRecognizer(target: self,
+                                                   action: #selector(tabBarDoubleClicked(_:)))
+        doubleClick.numberOfClicksRequired = 2
+        tabBar.addGestureRecognizer(doubleClick)
         findSearchField.placeholderString = "Find in terminal"
         findSearchField.delegate = self
 
@@ -163,7 +213,10 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
 
         let tab: TerminalTab
         do {
-            tab = try TerminalTab(configuration: configuration)
+            // A new tab opens where the person is, which is what every terminal
+            // with a notion of "where" does.
+            tab = try TerminalTab(configuration: configuration,
+                                  workingDirectory: tabs[focusedTab]?.currentDirectory)
         } catch {
             onSpawnFailure?(error)
             return false
@@ -197,10 +250,10 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         // not, every time they closed one.
         let position = tabIDs.firstIndex(of: id) ?? 0
         tabs.removeValue(forKey: id)
-        // A closed tab cannot be unread. The identity is never reused, so this is
-        // tidiness rather than correctness, but a set that only grows is a set
-        // that eventually lies about its size.
+        // A closed tab cannot be unread or need attention. The identity is never
+        // reused, so this is tidiness rather than correctness.
         unread.remove(id)
+        clearAttention(for: id)
 
         tabBar.remove(id)
 
@@ -385,18 +438,20 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         findBar.blendingMode = .withinWindow
         findBar.state = .active
         findBar.wantsLayer = true
-        findBar.layer?.cornerRadius = 9
-        findBar.layer?.borderWidth = 1
-        findBar.layer?.borderColor = NSColor.separatorColor.cgColor
-        findBar.layer?.masksToBounds = true
+        findBar.layer?.cornerRadius = 10
+        findBar.layer?.borderWidth = 0.5
+        findBar.layer?.masksToBounds = false
+        findBar.layer?.shadowOpacity = 1
+        findBar.layer?.shadowRadius = 12
+        findBar.layer?.shadowOffset = NSSize(width: 0, height: -4)
         findBar.translatesAutoresizingMaskIntoConstraints = false
         findBar.isHidden = true
 
-        findSearchField.placeholderString = "Find in terminal output…"
+        findSearchField.placeholderString = "Find…"
         findSearchField.setAccessibilityLabel("Find in terminal output")
         findSearchField.translatesAutoresizingMaskIntoConstraints = false
 
-        findCountLabel.font = .systemFont(ofSize: 10)
+        findCountLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         findCountLabel.textColor = .secondaryLabelColor
         findCountLabel.alignment = .center
         findCountLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -585,6 +640,106 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     func apply(_ configuration: Configuration) {
         self.configuration = configuration
         for tab in tabs.values { tab.apply(configuration) }
+        updateNewTabTooltip()
+        applyChrome()
+        refreshTitle()
+    }
+
+    /// Colour the window from the theme: title bar, strip and path bar are the
+    /// canvas lifted a step, and the window's appearance follows the palette so
+    /// the traffic lights and the title read correctly on it.
+    private func applyChrome() {
+        let chrome = Theme(configuration).chrome
+        window.appearance = NSAppearance(named: chrome.isDark ? .darkAqua : .aqua)
+        window.backgroundColor = chrome.background
+        contentView.layer?.backgroundColor = chrome.background.cgColor
+        paneHost.wantsLayer = true
+        paneHost.layer?.backgroundColor = chrome.canvas.cgColor
+        tabBar.chrome = chrome
+        pathBar.apply(chrome)
+        for case let button as NSButton in titlebarAccessory.view.subviews.flatMap({ $0.subviews }) {
+            button.contentTintColor = chrome.secondaryText
+        }
+    }
+
+    /// Search, more and settings, at the right of the title bar — the three
+    /// things the concept keeps one click away.
+    private func configureTitlebar() {
+        func button(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
+            let button = NSButton()
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
+                .withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
+            button.imagePosition = .imageOnly
+            button.isBordered = false
+            button.toolTip = label
+            button.refusesFirstResponder = true
+            button.target = self
+            button.action = action
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.widthAnchor.constraint(equalToConstant: 26).isActive = true
+            return button
+        }
+        let stack = NSStackView(views: [
+            button("magnifyingglass", "Find", #selector(titlebarFind(_:))),
+            button("ellipsis.circle", "More", #selector(titlebarMore(_:))),
+            button("gearshape", "Settings", #selector(titlebarSettings(_:))),
+        ])
+        stack.spacing = 2
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 10)
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 28))
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        holder.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
+            stack.centerYAnchor.constraint(equalTo: holder.centerYAnchor),
+        ])
+        titlebarAccessory.view = holder
+        titlebarAccessory.layoutAttribute = .right
+        window.addTitlebarAccessoryViewController(titlebarAccessory)
+    }
+
+    @objc private func titlebarFind(_ sender: NSButton) { onCommand?(.find) }
+
+    @objc private func titlebarSettings(_ sender: NSButton) { onCommand?(.settings) }
+
+    @objc private func titlebarMore(_ sender: NSButton) {
+        let menu = NSMenu()
+        for command in [Command.newTab, .newWindow, .splitRight, .splitDown, .closePane,
+                        .clearBuffer, .commandPalette] {
+            let item = NSMenuItem(title: command.title, action: #selector(runMenuCommand(_:)), keyEquivalent: "")
+            if let shortcut = Command.shortcut(for: command, overrides: configuration.keyboard.overrides) {
+                item.keyEquivalent = shortcut.menuKey
+                item.keyEquivalentModifierMask = AppMenu.modifiers(of: shortcut.modifiers)
+            }
+            item.target = self
+            item.representedObject = command.rawValue
+            menu.addItem(item)
+            if command == .newWindow || command == .closePane { menu.addItem(.separator()) }
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    @objc private func runMenuCommand(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let command = Command(rawValue: raw) else { return }
+        onCommand?(command)
+    }
+
+    /// The `+` names the New Tab shortcut in force, not the default.
+    private func updateNewTabTooltip() {
+        tabBar.newTabShortcut = Command.shortcut(for: .newTab,
+                                                 overrides: configuration.keyboard.overrides)?.display
+    }
+
+    /// Tell already-running shells about a new prompt. Font and theme changes
+    /// travel through `apply` above; a prompt is a shell variable, so it needs
+    /// a command instead.
+    func applyPromptStyle(_ configuration: Configuration) {
+        for tab in tabs.values { tab.applyPromptStyle(configuration) }
+    }
+
+    @objc private func tabBarDoubleClicked(_ sender: NSClickGestureRecognizer) {
+        // `zoom` toggles: it zooms a resting window and restores a zoomed one.
+        window.zoom(nil)
     }
 
     // MARK: - Unread
@@ -606,8 +761,9 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     /// question about what the person has seen rather than about the shell.
     func isUnread(_ tab: TabID) -> Bool { unread.contains(tab) }
 
-    /// Looking at a tab reads it.
+    /// Looking at a tab reads it, and answers whatever it needed attention for.
     private func markRead(_ id: TabID) {
+        clearAttention(for: id)
         guard unread.remove(id) != nil else { return }
         updateLabel(for: id)
     }
@@ -620,8 +776,11 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     /// disagree with itself. A rename does not touch `unread`, so renaming cannot
     /// silently clear the mark.
     private func updateLabel(for id: TabID) {
-        guard let tab = tabs[id] else { return }
-        tab.stripItem?.label = unread.contains(id) ? "\(tab.displayName) •" : tab.displayName
+        guard let tab = tabs[id], let item = tab.stripItem else { return }
+        let isUnread = unread.contains(id)
+        let label = isUnread ? "\(tab.displayName) •" : tab.displayName
+        if item.isUnread != isUnread { item.isUnread = isUnread }
+        if item.label != label { item.label = label }
     }
 
     /// Paint every tab's label.
@@ -631,6 +790,82 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     /// whether it is unread, and either can change without the other.
     private func updateAllLabels() {
         for id in tabs.keys { updateLabel(for: id) }
+    }
+
+    private static func attentionKey(_ id: TabID) -> String { String(id.raw) }
+
+    /// Drop a tab's attention item, if it has one, and update the strip.
+    private func clearAttention(for id: TabID) {
+        let before = attentionInbox.count
+        attentionInbox.remove(targetKey: Self.attentionKey(id))
+        guard attentionInbox.count != before else { return }
+        tabBar.setAttention(count: attentionInbox.count)
+    }
+
+    /// The attention list, as the menu under the strip's indicator shows it.
+    /// Built on demand, so the ages it shows are as of the click.
+    func attentionMenu(now: Date = Date()) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let header = NSMenuItem(title: "Needs Attention", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        for item in attentionInbox.items {
+            let entry = NSMenuItem(title: item.title,
+                                   action: #selector(focusAttentionItem(_:)),
+                                   keyEquivalent: "")
+            entry.attributedTitle = Self.attentionTitle(for: item, now: now)
+            let symbol = item.isFailure ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+            let tint: NSColor = item.isFailure ? .systemOrange : .systemGreen
+            let image = NSImage(systemSymbolName: symbol,
+                                accessibilityDescription: item.isFailure ? "Failed" : "Finished")
+            if #available(macOS 12.0, *) {
+                entry.image = image?.withSymbolConfiguration(.init(paletteColors: [tint]))
+            } else {
+                entry.image = image
+            }
+            entry.target = self
+            entry.representedObject = item.targetKey
+            entry.toolTip = item.body
+            menu.addItem(entry)
+        }
+        menu.addItem(.separator())
+        let clear = NSMenuItem(title: "Clear All", action: #selector(clearAllAttention(_:)), keyEquivalent: "")
+        clear.target = self
+        menu.addItem(clear)
+        return menu
+    }
+
+    /// Two lines: the tab's name, and what happened and when, in secondary text.
+    private static func attentionTitle(for item: AttentionItem, now: Date) -> NSAttributedString {
+        let title = NSMutableAttributedString(
+            string: item.title,
+            attributes: [.font: NSFont.menuFont(ofSize: 0)])
+        title.append(NSAttributedString(
+            string: "\n\(item.body) · \(item.age(now: now))",
+            attributes: [.font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+                         .foregroundColor: NSColor.secondaryLabelColor]))
+        return title
+    }
+
+    private func showAttentionMenu() {
+        guard !attentionInbox.isEmpty else { return }
+        let button = tabBar.attentionButton
+        attentionMenu().popUp(positioning: nil,
+                              at: NSPoint(x: button.frame.minX, y: button.frame.minY),
+                              in: tabBar)
+    }
+
+    @objc private func focusAttentionItem(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String, let raw = Int(key) else { return }
+        // Selecting the tab reads it, which is what clears its item.
+        if !focus(tab: TabID(raw)) { attentionInbox.remove(targetKey: key) }
+        tabBar.setAttention(count: attentionInbox.count)
+    }
+
+    @objc private func clearAllAttention(_ sender: NSMenuItem) {
+        attentionInbox.clear()
+        tabBar.setAttention(count: 0)
     }
 
     // MARK: - Commands that finish
@@ -655,8 +890,13 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
             isWatched: isBeingWatched(id),
             subject: tab.displayName
         ) else { return }
+        attentionInbox.add(AttentionItem(announcement, targetKey: Self.attentionKey(id)))
+        tabBar.setAttention(count: attentionInbox.count)
         deliver(announcement, id)
     }
+
+    /// What a tab is called right now, without the unread mark.
+    func tabLabel(_ id: TabID) -> String? { tabs[id]?.displayName }
 
     /// Bring one of this window's tabs to the front, if it still has it.
     ///
@@ -861,8 +1101,20 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         // A shell that has gone says so, and only in the tab that is in front: the
         // notice is about what the person is looking at, not about a tab that
         // happened to finish something in the background.
-        let title = pane.terminal.isRunning ? pane.title : "Nymbra \u{2014} shell exited"
-        window.title = title.isEmpty ? "Nymbra" : title
+        let facts = tab.titleFacts
+        let title = pane.terminal.isRunning
+            ? TerminalTitle.windowTitle(facts)
+            : "\(tab.displayName) \u{2014} shell exited"
+        if window.title != title { window.title = title }
+        let status: PathBarView.Status = !pane.terminal.isRunning ? .exited
+            : facts.foregroundProgram.map { .running($0) } ?? .idle
+        pathBar.update(
+            path: facts.directory,
+            crumbs: facts.directory.map { TerminalTitle.breadcrumbs($0, home: facts.home) } ?? [],
+            status: status,
+            shell: (pane.terminal.shellPath as NSString).lastPathComponent,
+            paletteShortcut: Command.shortcut(for: .commandPalette,
+                                              overrides: configuration.keyboard.overrides)?.display)
         window.subtitle = tab.layout.count > 1 ? "\(tab.layout.count) panes" : ""
         updateAllLabels()
     }
@@ -885,8 +1137,31 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
 
     func windowWillClose(_ notification: Notification) {
         isClosed = true
+        titleTimer?.invalidate()
+        titleTimer = nil
         for tab in tabs.values {
             for pane in tab.panes.values { pane.terminal.terminate() }
+        }
+    }
+}
+
+/// The floating find bar. Its border and shadow are layer colours, which are
+/// resolved once, so they are resolved again when light and dark switch.
+private final class FindBarView: NSVisualEffectView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyLayerColors()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyLayerColors()
+    }
+
+    private func applyLayerColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.7).cgColor
+            layer?.shadowColor = NSColor.black.withAlphaComponent(0.25).cgColor
         }
     }
 }

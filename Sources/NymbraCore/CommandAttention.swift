@@ -29,6 +29,9 @@ public enum CommandAttention {
         public var title: String
         /// How long it took, and — when it did not succeed — what it exited with.
         public var body: String
+        /// The command reported a non-zero exit status. A command that reported
+        /// no status at all is not a failure: nothing says it went badly.
+        public var isFailure: Bool = false
     }
 
     /// What to announce about a command that has finished, or `nil` for silence.
@@ -52,7 +55,8 @@ public enum CommandAttention {
         guard threshold > 0, seconds >= threshold, !isWatched else { return nil }
         return Announcement(
             title: subject.isEmpty ? "Command finished" : subject,
-            body: describe(status: status, seconds: seconds)
+            body: describe(status: status, seconds: seconds),
+            isFailure: (status ?? 0) != 0
         )
     }
 

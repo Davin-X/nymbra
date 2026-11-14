@@ -57,7 +57,7 @@ visible rather than discovered later.
 | Copy/paste | ✅ selection (click, word, line, drag), Cmd+C and Cmd+V with bracketed paste | — |
 | Scrollback buffer | ✅ 10 000 lines, scrolled with the wheel or trackpad; typing returns to the live screen | — |
 | Search in scrollback | ✅ a find bar (`⌘F`) over the terminal — query, match count, match case, whole word, regular expression, `↑` `↓`, `×` — with next/previous, `Invalid regex` reported rather than passed off as no matches, the query following the focused tab, and matches highlighted both in the live screen and in history; the matching is the model's and is asserted there (`FindSuite`: the three options, word boundaries, patterns that do not compile, and cells rather than characters), while the highlight is asserted by the pixels the view draws (`--find-test`), because a highlight nobody can see is invisible to every other kind of test. A match broken across a soft wrap is not found yet: the matcher reads one row at a time | M3 |
-| Tabs and split panes | ✅ tabs are drawn by Nymbra rather than `NSTabView` — chips from the left edge in the order they were opened, a `×` on each (closing that tab without moving the person into it), the `+` after the last of them, the terminal filling the window below, right-click for tab actions, drag to reorder; the geometry is asserted from the frames (`--tabs-test`: strip, host, order, `+`, `×`) because "the tabs are on screen where they say they are" is not a claim a unit test can make. A strip with more tabs than fit does not scroll yet | M1.x (P0) |
+| Tabs and split panes | ✅ tabs are drawn by Nymbra rather than `NSTabView` — chips from the left edge in the order they were opened, a `×` on each (closing that tab without moving the person into it), the `+` after the last of them, the terminal filling the window below, right-click for tab actions, drag to reorder; the geometry is asserted from the frames (`--tabs-test`: strip, host, order, `+`, `×`) because "the tabs are on screen where they say they are" is not a claim a unit test can make. A strip with more tabs than fit scrolls horizontally — `NSScrollView` with a chip container as its document view, `+` fixed at the right edge, trackpad scrolling native | M1.x (P0) |
 | Text reflow on resize | ✅ live screen and history rewrap on resize; soft-wrapped rows are rejoined and rewrapped | — |
 | Mouse reporting | ✅ modes 1000/1002/1003 in the X10 and SGR encodings | — |
 | Settings: theme, font, colours, cursor, keybindings | ✅ navigable pages, live preview, shortcut recording, custom executable shell paths, and a readable palette | M2 |
@@ -160,11 +160,10 @@ shells that look correct cannot answer the question, and the witness that can is
 independently, with no shared mutable state between them. — met: `make
 split-test` reports `panes=4 … jobControl=1 … closed=3 sameShells=1`.
 
-**Not done:** a strip that scrolls. Chips shrink as tabs accumulate — down to a
-minimum — and past that the last ones are clipped rather than reachable by
-scrolling, so thirty tabs are thirty tabs you can reach with `⌘⇧]` or the palette
-but not with the mouse. A horizontally scrolling strip is the fix, and it is
-worth doing before anybody has thirty tabs.
+**Not done:** nothing outstanding. The strip scrolls horizontally when chips
+overflow — `NSScrollView` with a chip container as its document view, `+` fixed
+at the right edge, trackpad scrolling native. Forty tabs are reachable with the
+mouse, not just `⌘⇧]` or the palette.
 
 ### M2 — Settings and configuration ✅
 
@@ -186,9 +185,21 @@ twice.
   Keyboard, Shell, Behaviour and Advanced; the live preview draws with the same
   `Theme` and palette the terminal does. Changes apply to the open terminal as
   they are made; saving is debounced.
+- The window is a real split view, not a strip: a fixed-width navigation sidebar
+  beside a scrolling detail pane. The content view is pinned to the window's
+  content layout guide, so it takes its width from the window rather than from the
+  widest control inside it — without that, Auto Layout collapsed the whole window
+  to its fitting width. Each pane is a flipped stack, so its content packs against
+  the top and a tall window shows empty space at the bottom instead of spreading
+  the rows apart.
 - `Palette` in the UI-free core: eight presets, per-colour overrides, WCAG
   contrast arithmetic and the xterm 256-colour table. Only the `CGColor`
   conversion lives in the app (`Theme`).
+- `PromptStyle` in the core: eight named prompt shapes, each a list of runs with
+  its palette slot and whether it fills a block. The gallery's cards, the live
+  preview, and the zsh `PROMPT` handed to new shells are all built from the one
+  model, so a card cannot promise a prompt the shell does not wear. Applying a
+  style is opt-in, zsh-only, and never edits the user's startup files.
 - `Selection`: click, double-click, triple-click and drag, with the text
   extraction in the core, so copy is testable without a window.
 - `Command`/`Shortcut` in `NymbraInput`: one list of application commands read by
@@ -200,7 +211,7 @@ twice.
 
 | Setting | Detail |
 |---|---|
-| Appearance | Live preview, font family and size, and eight theme presets |
+| Appearance | Live preview, font family and size, eight theme presets, and a gallery of common shell prompts that draws into the preview |
 | Keyboard | Searchable shortcuts, recorded key combinations, and default restoration |
 | Shell | Built-in and `/etc/shells` choices, plus a validated custom executable path |
 | Behaviour | Cursor style and blink, scrollback size, confirm before closing a session that is still running |

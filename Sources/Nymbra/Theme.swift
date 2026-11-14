@@ -57,6 +57,61 @@ struct Theme {
         Self.colour(Palette.blend(palette.background, with: palette.foreground, amount: 0.18))
     }
 
+    /// The colours of everything around the terminal: the title bar, the tab
+    /// strip and the path bar.
+    ///
+    /// Derived from the palette rather than taken from the system, so the
+    /// window reads as one surface in every preset — the chrome is the canvas
+    /// lifted a step toward the text, never a grey bar from another app.
+    struct Chrome {
+        let isDark: Bool
+        /// The title bar, tab strip and path bar.
+        let background: NSColor
+        /// The terminal itself.
+        let canvas: NSColor
+        /// The selected tab.
+        let raised: NSColor
+        /// A tab under the pointer.
+        let hover: NSColor
+        /// Hairlines between the strip, the path bar and the terminal.
+        let border: NSColor
+        let text: NSColor
+        let secondaryText: NSColor
+        let tertiaryText: NSColor
+        /// "Shell running": the palette's green, held readable on the chrome.
+        let positive: NSColor
+        /// "Running a program": the palette's yellow.
+        let busy: NSColor
+    }
+
+    var chrome: Chrome {
+        let bg = palette.background
+        let fg = palette.foreground
+        let isDark = bg.luminance < 0.4
+        let surface = Palette.blend(bg, with: fg, amount: isDark ? 0.045 : 0.035)
+        func ns(_ rgb: Palette.RGB) -> NSColor {
+            NSColor(srgbRed: CGFloat(rgb.red) / 255, green: CGFloat(rgb.green) / 255,
+                     blue: CGFloat(rgb.blue) / 255, alpha: 1)
+        }
+        func tint(_ index: Int, fallback: Palette.RGB) -> NSColor {
+            let colour = palette.ansi.indices.contains(index) ? palette.ansi[index] : fallback
+            return ns(Palette.readable(colour, on: surface))
+        }
+        return Chrome(
+            isDark: isDark,
+            background: ns(surface),
+            canvas: ns(bg),
+            raised: ns(Palette.blend(bg, with: fg, amount: isDark ? 0.11 : 0.08)),
+            hover: ns(Palette.blend(bg, with: fg, amount: isDark ? 0.075 : 0.055)),
+            border: ns(Palette.blend(bg, with: fg, amount: isDark ? 0.14 : 0.12)),
+            text: ns(fg),
+            secondaryText: ns(Palette.blend(fg, with: surface, amount: 0.38)),
+            tertiaryText: ns(Palette.blend(fg, with: surface, amount: 0.58)),
+            positive: tint(2, fallback: Palette.RGB(red: 0x4C, green: 0xC3, blue: 0x7A)),
+            busy: tint(3, fallback: Palette.RGB(red: 0xE5, green: 0xC0, blue: 0x7B))
+        )
+    }
+
     /// Resolve a pair of attributes to concrete colours. `nil` means "the
     /// default background", which lets a run with no background skip its
     /// rectangle entirely.

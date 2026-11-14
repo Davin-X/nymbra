@@ -117,18 +117,36 @@ public struct ShellIntegration: Sendable {
 
     /// Write the startup files into `directory`, standing in front of the shell
     /// startup that lives in `userZDOTDIR`.
-    public static func zsh(in directory: URL, userZDOTDIR: String) throws -> ShellIntegration {
+    ///
+    /// `marks` asks for `OSC 133` reporting; `prompt` asks the shell to wear a
+    /// generated prompt. Either can be requested alone: a person who wants a
+    /// Nymbra prompt has not thereby agreed to let Nymbra track their commands,
+    /// and the reverse. The snippet is generated with only the parts that were
+    /// asked for, so "off" is an absence rather than a flag the shell has to
+    /// respect.
+    public static func zsh(in directory: URL,
+                           userZDOTDIR: String,
+                           marks: Bool = true,
+                           prompt: ZshPrompt? = nil) throws -> ShellIntegration {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try snippet.write(to: directory.appendingPathComponent("nymbra.zsh"),
-                          atomically: true, encoding: .utf8)
+        try snippet(marks: marks, prompt: prompt).write(
+            to: directory.appendingPathComponent("nymbra.zsh"),
+            atomically: true, encoding: .utf8)
         for name in startupFiles {
             try startup(named: name).write(to: directory.appendingPathComponent(name),
                                            atomically: true, encoding: .utf8)
         }
-        return ShellIntegration(environment: [
+        var environment = [
             "ZDOTDIR": directory.path,
             "NYMBRA_USER_ZDOTDIR": userZDOTDIR,
-        ])
+        ]
+        if let prompt {
+            environment["NYMBRA_PROMPT"] = prompt.prompt
+            if !prompt.rightPrompt.isEmpty {
+                environment["NYMBRA_RPROMPT"] = prompt.rightPrompt
+            }
+        }
+        return ShellIntegration(environment: environment)
     }
 
     /// One generated startup file: the user's own, then — for the interactive
@@ -165,32 +183,39 @@ public struct ShellIntegration: Sendable {
     ///
     /// A raw literal, so the escape sequences a terminal needs survive being
     /// written down as shell source.
-    private static let snippet = #"""
-    # Nymbra shell integration for zsh.
-    #
-    # Nymbra starts zsh with ZDOTDIR pointing at a small generated directory
-    # whose startup files load your own first and then this one. Your files are
-    # never edited, and turning the setting off puts your shell back exactly as it
-    # was.
-    #
-    # This file's whole job is to tell the terminal what the shell is doing, with
-    # OSC 133 marks, because the terminal cannot work it out for itself: a
-    # prompt, a command, and a command's output are all just bytes coming back up
-    # the pty.
-    #
-    #   A   a prompt is about to be printed
-    #   C   the command is about to run, with the line as it was typed
-    #   D   the command finished, with its exit status
-    #
-    # `B`, which marks where the command line begins, is deliberately not sent.
-    # The only way to know when zsh has finished drawing the prompt is to define
-    # its `zle-line-init` widget, and that is the line editor — the one part of a
-    # shell where being second in line is worse than not being there at all.
-    # Nothing built here needs it yet, so it can wait.
-    #
-    # Nothing here changes the prompt, and nothing here is written to disk.
+    private static func snippet(marks: Bool, prompt: ZshPrompt?) -> String {
+        var text = """
+        # Nymbra shell integration for zsh.
+        #
+        # Nymbra starts zsh with ZDOTDIR pointing at a small generated directory
+        # whose startup files load your own first and then this one. Your files are
+        # never edited, and turning the setting off puts your shell back exactly as it
+        # was.
 
-    [[ -o interactive ]] || return 0
+        [[ -o interactive ]] || return 0
+
+        """
+        if marks { text += marksSnippet + "\n" }
+        if let prompt { text += promptSnippet(branch: prompt.usesBranch) }
+        return text
+    }
+
+    /// The part that tells the terminal what the shell is doing, with OSC 133
+    /// marks, because the terminal cannot work it out for itself: a prompt, a
+    /// command, and a command's output are all just bytes coming back up the pty.
+    ///
+    ///   A   a prompt is about to be printed
+    ///   C   the command is about to run, with the line as it was typed
+    ///   D   the command finished, with its exit status
+    ///
+    /// `B`, which marks where the command line begins, is deliberately not sent.
+    /// The only way to know when zsh has finished drawing the prompt is to define
+    /// its `zle-line-init` widget, and that is the line editor — the one part of a
+    /// shell where being second in line is worse than not being there at all.
+    /// Nothing built here needs it yet, so it can wait.
+    ///
+    /// This part never changes the prompt, and nothing here is written to disk.
+    private static let marksSnippet = #"""
     autoload -Uz add-zsh-hook 2>/dev/null || return 0
 
     typeset -g __nymbra_running=0
@@ -239,6 +264,10 @@ public struct ShellIntegration: Sendable {
         printf '\e]133;D;%d\a' "$__nymbra_status"
         __nymbra_running=0
       fi
+      # Where the shell is (OSC 7), percent-encoded the same way as the command,
+      # so it is right over ssh and for paths with spaces.
+      __nymbra_encode "$PWD"
+      printf '\e]7;file://%s%s\a' "${HOST-}" "$__nymbra_encoded"
       printf '\e]133;A\a'
     }
 
@@ -248,6 +277,54 @@ public struct ShellIntegration: Sendable {
     precmd_functions=(__nymbra_precmd $precmd_functions)
     preexec_functions=(__nymbra_preexec $preexec_functions)
     """#
+
+    /// The part that gives zsh the prompt the person picked.
+    ///
+    /// The prompt itself travels in `NYMBRA_PROMPT`, written by Nymbra when the
+    /// shell is started, rather than being pasted into this file: the same file is
+    /// regenerated for every shell, and a value in the environment is what makes a
+    /// tab's prompt belong to that tab. `prompt_subst` is on so the branch in the
+    /// prompt is read fresh from `$__nymbra_branch` on every draw.
+    private static func promptSnippet(branch: Bool) -> String {
+        var text = ""
+        if branch {
+            text += #"""
+            typeset -g __nymbra_branch=''
+            function __nymbra_prompt_precmd() {
+              # `--abbrev-ref HEAD` answers with the branch name even in a worktree,
+              # and prints nothing outside a repository. Stderr is dropped rather
+              # than shown: "not a git repository" is not a problem to report on
+              # every prompt in a home directory.
+              #
+              # Git is deliberately not run inside the folders macOS protects
+              # (Documents, Desktop, Downloads): asking it to look at one of them
+              # makes the system put up a permission dialog on every new tab, and a
+              # branch name is not worth that. The prompt simply shows no branch
+              # there.
+              case "$PWD" in
+                "$HOME/Documents"|"$HOME/Documents"/*|"$HOME/Desktop"|"$HOME/Desktop"/*|"$HOME/Downloads"|"$HOME/Downloads"/*)
+                  __nymbra_branch=''
+                  ;;
+                *)
+                  __nymbra_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+                  ;;
+              esac
+            }
+            precmd_functions=(__nymbra_prompt_precmd $precmd_functions)
+
+            """#
+        }
+        text += #"""
+        # A shell started without a prompt in its environment (an old tab, or a
+        # person running the snippet by hand) keeps the prompt it already had.
+        if [[ -n ${NYMBRA_PROMPT-} ]]; then
+          setopt prompt_subst
+          PROMPT=$NYMBRA_PROMPT
+          RPROMPT=${NYMBRA_RPROMPT-}
+        fi
+        """#
+        return text + "\n"
+    }
 }
 
 extension Configuration {
@@ -255,23 +332,37 @@ extension Configuration {
     /// The shell integration this configuration asks for, or `nil` when it asks
     /// for none.
     ///
+    /// There are two reasons to generate the files: reporting marks (the
+    /// behaviour setting) and wearing a prompt (a prompt style with "Apply in new
+    /// zsh tabs" on). They are independent, so selecting a prompt does not turn
+    /// command tracking on, and enabling tracking does not take the person's own
+    /// prompt away. Both travel through one `ZDOTDIR`, because zsh reads startup
+    /// files from one place.
+    ///
     /// The files are rewritten on every call, which is what makes the answer
-    /// always match the setting: turning the setting off has nothing to undo,
-    /// it just stops pointing `ZDOTDIR` at them. A shell already running keeps
+    /// always match the settings: turning either one off has nothing to undo, it
+    /// just stops pointing `ZDOTDIR` at them. A shell already running keeps
     /// whatever environment it was started with, so the change lands on the next
     /// shell.
     ///
     /// Returns `nil` if the files cannot be written — a terminal that refused to
     /// open a window because it could not write its own shell helper would be a
     /// worse bug than the one it was reporting. The visible result is then the
-    /// same as the setting being off: a shell that does not report its marks.
+    /// same as both settings being off.
     public func shellIntegration(
         in supportDirectory: URL = Configuration.supportDirectory,
-        userZDOTDIR: String = ProcessInfo.processInfo.environment["ZDOTDIR"] ?? ""
+        userZDOTDIR: String = ProcessInfo.processInfo.environment["ZDOTDIR"]
+            ?? NSHomeDirectory()
     ) -> ShellIntegration? {
-        guard behaviour.shellIntegration else { return nil }
+        let prompt: ZshPrompt? = appearance.promptStyleApplied
+            ? PromptStyle(stored: appearance.promptStyle)
+                .zshPrompt(palette: Palette(preset: colours.preset, overrides: colours.overrides))
+            : nil
+        guard behaviour.shellIntegration || prompt != nil else { return nil }
         return try? ShellIntegration.zsh(
             in: supportDirectory.appendingPathComponent("shell"),
-            userZDOTDIR: userZDOTDIR)
+            userZDOTDIR: userZDOTDIR,
+            marks: behaviour.shellIntegration,
+            prompt: prompt)
     }
 }

@@ -66,6 +66,33 @@ public enum Keyboard {
         case f20 = 90
     }
 
+    /// Whether a key press goes through the system's input method (for
+    /// composing text) rather than straight to the key table.
+    ///
+    /// The input method is what makes Japanese, Chinese and Korean input, dead
+    /// keys and press-and-hold accents work: it may hold a keystroke, show a
+    /// candidate window, and only later hand over finished text. So:
+    ///
+    /// - **while something is being composed, everything goes to it** — Return
+    ///   commits, Escape cancels, the arrows choose a candidate, Delete edits;
+    /// - otherwise, **keys that are not text go straight to the table**: the
+    ///   arrows, Return, Tab, Escape, Delete, the function keys. A program
+    ///   reading the terminal needs their exact xterm encodings, which an input
+    ///   method knows nothing about;
+    /// - and so do **Control and Option chords**: `⌃C` is a signal, not a
+    ///   letter, and Option is Meta, the way the key table has always sent it.
+    ///
+    /// Everything else — plain text, with or without Shift — goes to the input
+    /// method, which for an ordinary keyboard layout hands it straight back.
+    public static func routesThroughInputMethod(keyCode: UInt16,
+                                                modifiers: Modifiers,
+                                                isComposing: Bool) -> Bool {
+        if isComposing { return true }
+        if Key(rawValue: keyCode) != nil { return false }
+        if modifiers.contains(.control) || modifiers.contains(.option) { return false }
+        return true
+    }
+
     /// The bytes to send for a key press.
     ///
     /// Returns nothing for a Command chord, which belongs to the application

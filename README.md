@@ -90,6 +90,14 @@ apply to the open terminal as you make them — the preview is a real terminal
 drawing with the same code and the same colours as the window behind it, not a
 mock-up. Reset shows what will change before it changes anything.
 
+The **prompt style** gallery does more than draw a preview. Picking a card (or
+ticking **Apply in new zsh tabs**) teaches new zsh tabs that prompt. A shell that
+is already running keeps the prompt it started with, other shells are left alone,
+and Nymbra still never edits your startup files — the prompt is handed to the
+child shell through a generated `ZDOTDIR`, the same mechanism as shell
+integration. Branch names come from `git`; outside a repository that part is
+empty.
+
 Settings live in one hand-editable JSON file:
 
 ```
@@ -128,7 +136,7 @@ of its own settings file.
 | `make tabs-test` | The strip's geometry, per-tab close buttons, reordering, and independent shells |
 | `make palette-test` | The command palette, driven with real key events |
 | `make find-test` | Find options, the highlight the view actually draws, and a proof that the current match looks different from the others |
-| `make settings-test` | The settings window and the shortcut recorder's rules |
+| `make settings-test` | The settings window, the prompt gallery redrawing the preview, and the shortcut recorder's rules |
 | `make mouse-test` | Mouse reporting bytes, asserted headlessly |
 | `make shell-integration-test` | A real zsh, reporting what it is doing |
 | `make notify-test` | A long command in a background tab, announced |
@@ -144,7 +152,7 @@ asserted in text rather than by eye:
 | `--screen-debug "<cmd>"` | The same screen with blanks shown as `·` |
 | `--theme-test` | Every preset, and the contrast of every colour in it |
 | `--menu-test` | The menu bar and its key equivalents |
-| `--settings-test` | The settings window's pages, gallery, and the recorder's rules and lifetime |
+| `--settings-test` | The settings window's pages, gallery, prompt styles, and the recorder's rules and lifetime |
 | `--palette-test` | The palette's rows, highlight, arrows, Return and Escape |
 | `--find-test` | The find bar's state, its three options, and the pixels of the highlight it draws |
 | `--resize-test` | The grid the view reports against the grid the shell is told, including a view with no size |

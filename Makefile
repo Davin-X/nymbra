@@ -3,7 +3,7 @@
 # asking *inside* a recipe can race the build that just finished.
 bin = $(shell swift build -c release --show-bin-path 2>/dev/null)
 
-.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test tabs-test mouse-test shell-integration-test notify-test lint architecture check clean
+.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test tabs-test location-test input-test mouse-test shell-integration-test notify-test lint architecture check clean
 
 help:
 	@echo "make build       - release build"
@@ -99,6 +99,16 @@ window-test: build
 tabs-test: build
 	"$(bin)/Nymbra" --tabs-test
 
+# Knowing where you are: the tab, the window title and the path bar follow the
+# shell's folder and the program in front, with shell integration off.
+location-test: build
+	"$(bin)/Nymbra" --location-test
+
+# Input methods (IME) and synchronized output: composed text is drawn and not
+# sent, committed text is sent once, real keys keep their bytes.
+input-test: build
+	"$(bin)/Nymbra" --input-test
+
 # The command palette, driven with real key events. That is the point of it: a
 # text field's own `keyDown` is never called while the field is being edited, so
 # a palette that reads its arrows there is a palette whose arrows do nothing.
@@ -131,7 +141,7 @@ shell-integration-test: build
 notify-test: build
 	"$(bin)/Nymbra" --notify-test
 
-check: architecture test pty-test screen-test resize-test window-test tabs-test palette-test find-test settings-test mouse-test shell-integration-test notify-test
+check: architecture test pty-test screen-test resize-test window-test tabs-test location-test input-test palette-test find-test settings-test mouse-test shell-integration-test notify-test
 
 clean:
 	swift package clean

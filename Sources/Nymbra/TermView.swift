@@ -33,8 +33,10 @@ final class TermView: NSView {
     private var cellHeight: CGFloat
     private var ascent: CGFloat
     private var descent: CGFloat
-    private let paddingX: CGFloat = 10
-    private let paddingY: CGFloat = 8
+    // Room around the grid, so text does not sit against the window's edge —
+    // the breathing space the concept gives the canvas.
+    private let paddingX: CGFloat = 14
+    private let paddingY: CGFloat = 10
 
     private(set) var cols: Int
     private(set) var rows: Int
@@ -49,6 +51,46 @@ final class TermView: NSView {
     /// Trackpad scroll deltas are fractional. Carry the remainder between events
     /// so a slow scroll is not rounded away to nothing.
     private var scrollRemainder: CGFloat = 0
+
+    /// How much of the scrollback had been appended when the view last looked.
+    /// The difference is how far history moved under a viewport scrolled up
+    /// into it, which is what keeps that viewport still while output arrives.
+    private var seenAppendedCount = 0
+
+    /// The vertical scrollbar that sits on the right edge of the pane.
+    ///
+    /// Overlay style: it floats over the terminal and takes no grid space, so
+    /// showing it never resizes the shell. A bare `NSScroller` does not fade the
+    /// way one inside a scroll view does, so the view decides: it shows while the
+    /// viewport is up in history, flashes briefly after a scroll back to the live
+    /// screen, and is otherwise hidden — so it neither covers the last column nor
+    /// catches clicks meant for a selection.
+    private let scroller: TerminalScroller = {
+        let s = TerminalScroller()
+        s.scrollerStyle = .overlay
+        s.knobStyle = .default
+        s.isHidden = true
+        return s
+    }()
+
+    // MARK: Input method state
+
+    /// Text being composed by the input method and not yet committed: the
+    /// reading of a Japanese word, a dead key's accent. Drawn at the cursor,
+    /// underlined, and never sent to the program until it is committed.
+    private(set) var markedText = ""
+    private var markedSelection = NSRange(location: 0, length: 0)
+    /// The key press the input method is working on, so a key it hands back
+    /// with no text (`doCommand`) can still be sent as itself.
+    private var pendingKeyEvent: NSEvent?
+
+    /// The longest a program may hold a frame open (DEC 2026) before the view
+    /// draws anyway.
+    private var syncTimeout: Timer?
+
+    /// Whether the view is holding its last complete frame for a program that
+    /// is mid-frame (DEC 2026). For the proofs.
+    var isHoldingFrame: Bool { syncTimeout != nil }
 
     /// Cursor blink phase, and the timer that advances it.
     private var blinkOn = true
@@ -98,6 +140,13 @@ final class TermView: NSView {
 
         super.init(frame: frame)
         screen.scrollbackLimit = configuration.behaviour.scrollbackLines
+        seenAppendedCount = screen.scrollback.appendedCount
+
+        scroller.target = self
+        scroller.action = #selector(scrollerDidChange(_:))
+        addSubview(scroller)
+        scroller.frame = scrollerFrame()
+        updateScroller()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -107,11 +156,23 @@ final class TermView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         updateGridSize()
+        scroller.frame = scrollerFrame()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         updateBlinkTimer()
+    }
+
+    override func layout() {
+        super.layout()
+        scroller.frame = scrollerFrame()
+    }
+
+    /// The scroller's frame, pinned to the right edge of the view.
+    private func scrollerFrame() -> NSRect {
+        let width = NSScroller.scrollerWidth(for: .regular, scrollerStyle: scroller.scrollerStyle)
+        return NSRect(x: bounds.width - width, y: 0, width: width, height: bounds.height)
     }
 
     /// Apply new settings. Live: the metrics are re-measured and the grid
@@ -133,6 +194,7 @@ final class TermView: NSView {
         updateGridSize()
         updateBlinkTimer()
         needsDisplay = true
+        updateScroller()
     }
 
     private func updateGridSize() {
@@ -160,6 +222,7 @@ final class TermView: NSView {
         scrollRemainder = 0
         onResize?(size)
         needsDisplay = true
+        updateScroller()
     }
 
     // MARK: - Metrics
@@ -272,8 +335,11 @@ final class TermView: NSView {
         for (row, line) in lines.enumerated() { drawRow(line, row: row, ctx: ctx) }
 
         // The cursor belongs to the live screen, so it is not drawn while the
-        // viewport sits up in scrollback.
-        if scrollOffset == 0 { drawCursor(ctx) }
+        // viewport sits up in scrollback. Text being composed sits where the
+        // cursor is, in its place.
+        if scrollOffset == 0 {
+            if markedText.isEmpty { drawCursor(ctx) } else { drawMarkedText(ctx) }
+        }
 
     }
 
@@ -529,6 +595,23 @@ final class TermView: NSView {
         returnToLiveScreen()
         restartBlink()
 
+        // Text goes through the input method, so composing (Japanese, dead keys,
+        // press-and-hold accents, the emoji picker) works; keys that are not
+        // text go straight to the table. The rule is `NymbraInput`'s.
+        if Keyboard.routesThroughInputMethod(keyCode: event.keyCode,
+                                             modifiers: Self.modifiers(from: flags),
+                                             isComposing: hasMarkedText()) {
+            pendingKeyEvent = event
+            defer { pendingKeyEvent = nil }
+            interpretKeyEvents([event])
+            return
+        }
+        sendKey(event)
+    }
+
+    /// The key table: an event in, xterm's bytes out.
+    private func sendKey(_ event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // The mapping itself lives in NymbraInput, where it is asserted without
         // a window. This method is only the AppKit boundary.
         let bytes = Keyboard.bytes(
@@ -562,7 +645,10 @@ final class TermView: NSView {
             sendMouseReport(for: event)
             return
         }
-        guard !screen.scrollback.isEmpty else { return }
+        // The alternate screen has no history of its own: a full-screen program
+        // owns the whole view, and showing the shell's scrollback above it would
+        // mix two unrelated screens.
+        guard !screen.scrollback.isEmpty, !screen.altScreenActive else { return }
         if event.hasPreciseScrollingDeltas {
             scrollRemainder += event.scrollingDeltaY
             let lines = (scrollRemainder / cellHeight).rounded(.towardZero)
@@ -581,6 +667,7 @@ final class TermView: NSView {
         guard updated != scrollOffset else { return }
         scrollOffset = updated
         needsDisplay = true
+        flashScroller()
     }
 
     private func returnToLiveScreen() {
@@ -588,10 +675,112 @@ final class TermView: NSView {
         scrollOffset = 0
         scrollRemainder = 0
         needsDisplay = true
+        updateScroller()
+    }
+
+    /// The screen changed underneath the view: redraw, and keep a viewport that
+    /// is up in history looking at the same lines.
+    ///
+    /// `scrollOffset` counts up from the live screen, so without this every line
+    /// of new output would slide the history being read up by one. The shift is
+    /// the number of lines appended since the last look — whether the history
+    /// grew or, once full, dropped its oldest line to make room, the line being
+    /// read moved by exactly that much.
+    func screenDidUpdate() {
+        let appended = screen.scrollback.appendedCount
+        let moved = appended &- seenAppendedCount
+        seenAppendedCount = appended
+        scrollOffset = Screen.pinnedScrollOffset(scrollOffset, linesAppended: moved,
+                                                 historyCount: screen.scrollback.count)
+        // Mid-frame (DEC 2026): hold the last complete picture. A program that
+        // never ends its frame is not allowed to freeze the view — after a short
+        // wait the screen is drawn as it stands, which is what xterm and kitty do.
+        if screen.synchronizedOutput {
+            if syncTimeout == nil {
+                syncTimeout = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { [weak self] _ in
+                    self?.syncTimeout = nil
+                    self?.needsDisplay = true
+                }
+            }
+            updateScroller()
+            return
+        }
+        syncTimeout?.invalidate()
+        syncTimeout = nil
+        needsDisplay = true
+        updateScroller()
+    }
+
+    // MARK: - Scroller
+
+    /// Whether the scroller is in its short after-scroll flash.
+    private var scrollerFlashing = false
+    private var scrollerFlashTimer: Timer?
+
+    /// Show the scroller for a moment, the way a system scroll view does after
+    /// a scroll, so a person scrolling back to the bottom sees where they landed.
+    private func flashScroller() {
+        scrollerFlashing = true
+        scrollerFlashTimer?.invalidate()
+        scrollerFlashTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+            self?.scrollerFlashing = false
+            self?.updateScroller()
+        }
+        updateScroller()
+    }
+
+    /// Whether the scrollbar should be on screen at all. See `scroller`.
+    var scrollerIsVisible: Bool { !scroller.isHidden }
+
+    /// The viewport's distance up into history, for the window tests.
+    var currentScrollOffset: Int { scrollOffset }
+
+    /// Refresh the scrollbar to match the current scrollback and viewport.
+    /// Call whenever scrollOffset, rows, or scrollback changes.
+    private func updateScroller() {
+        let scrollbackCount = screen.scrollback.count
+        let visible = scrollbackCount > 0
+            && !screen.altScreenActive
+            && (scrollOffset > 0 || scrollerFlashing)
+        if scroller.isHidden == visible { scroller.isHidden = !visible }
+        guard visible else { return }
+        let total = Double(scrollbackCount + rows)
+        scroller.knobProportion = total > 0 ? Double(rows) / total : 1.0
+        // floatValue is a 0–1 fraction: 0 = oldest scrollback (top), 1 = live screen (bottom).
+        scroller.floatValue = Float(1.0 - Double(scrollOffset) / Double(scrollbackCount))
+    }
+
+    @objc private func scrollerDidChange(_ sender: NSScroller) {
+        let scrollbackCount = screen.scrollback.count
+        guard scrollbackCount > 0 else { return }
+        // A page is a screenful less one line, so the line at the edge stays in
+        // view as context — what `less` and every scroll view do.
+        let page = max(1, rows - 1)
+        switch sender.hitPart {
+        case .decrementPage:
+            scroll(by: page)
+        case .incrementPage:
+            scroll(by: -page)
+        case .knob, .knobSlot:
+            let fraction = Double(sender.floatValue)
+            let newOffset = Int(((1.0 - fraction) * Double(scrollbackCount)).rounded())
+            scroll(by: min(max(0, newOffset), scrollbackCount) - scrollOffset)
+            scrollRemainder = 0
+        default:
+            break
+        }
     }
 
     /// Cmd+V. Wrapped in the bracketed-paste guards when the program asked for
     /// them, so a paste is not read as typing.
+    @objc func copySelection(_ sender: Any?) {
+        _ = copySelectionToPasteboard()
+    }
+
+    @objc func selectAllText(_ sender: Any?) {
+        selectEverything()
+    }
+
     @objc func paste(_ sender: Any?) {
         guard let text = NSPasteboard.general.string(forType: .string) else { return }
         var bytes = Array(text.utf8)
@@ -746,7 +935,11 @@ final class TermView: NSView {
             sendMouseReport(for: event)
             return
         }
-        // Right-click without mouse reporting does nothing by default.
+        // A right-click that no program claimed belongs to the person: show the
+        // clipboard menu rather than swallowing the click.
+        if let menu = self.menu(for: event) {
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+        }
     }
 
     override func rightMouseUp(with event: NSEvent) {
@@ -812,6 +1005,41 @@ final class TermView: NSView {
     /// Paste, wrapped in the bracketed-paste guards when the program asked for
     /// them, so a paste is not read as typing. Newlines become carriage returns,
     /// which is what a line editor expects from a paste.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        // A program that asked for the mouse keeps right-click for itself. When
+        // nobody asked, the click belongs to the person, and a small menu is the
+        // least a terminal can offer.
+        guard screen.mouseMode == .off else { return nil }
+        let menu = NSMenu()
+        let copyItem = NSMenuItem(title: "Copy", action: #selector(copySelection(_:)), keyEquivalent: "")
+        copyItem.target = self
+        copyItem.isEnabled = selection != nil
+        menu.addItem(copyItem)
+        let pasteItem = NSMenuItem(title: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+        pasteItem.target = self
+        menu.addItem(pasteItem)
+        let selectAllItem = NSMenuItem(title: "Select All", action: #selector(selectAllText(_:)), keyEquivalent: "")
+        selectAllItem.target = self
+        menu.addItem(selectAllItem)
+        let controller = (NSApp.delegate as? AppDelegate)?.controller
+        if let controller {
+            let clearItem = NSMenuItem(title: "Clear", action: #selector(AppController.clearBuffer(_:)), keyEquivalent: "")
+            clearItem.target = controller
+            menu.addItem(clearItem)
+            menu.addItem(NSMenuItem.separator())
+            let newTabItem = NSMenuItem(title: "New Tab", action: #selector(AppController.newTab(_:)), keyEquivalent: "")
+            newTabItem.target = controller
+            menu.addItem(newTabItem)
+            let splitRightItem = NSMenuItem(title: "Split Right", action: #selector(AppController.splitRight(_:)), keyEquivalent: "")
+            splitRightItem.target = controller
+            menu.addItem(splitRightItem)
+            let splitDownItem = NSMenuItem(title: "Split Down", action: #selector(AppController.splitDown(_:)), keyEquivalent: "")
+            splitDownItem.target = controller
+            menu.addItem(splitDownItem)
+        }
+        return menu
+    }
+
     func pasteFromPasteboard() {
         guard let text = NSPasteboard.general.string(forType: .string) else { return }
         var bytes = Array(text.utf8)
@@ -915,16 +1143,126 @@ final class TermView: NSView {
     }
 
     private func scrollToMatch(_ match: FindMatch) {
-        let targetRow = match.row
-        // Scroll so the match is in the middle of the viewport if possible.
-        let offset = max(0, targetRow - screen.rows / 2)
-        scrollOffset = max(0, min(offset, screen.scrollback.count))
+        let history = screen.scrollback.count
+        // `match.row` is absolute (history first), and `scrollOffset` counts up
+        // from the live screen, so convert: put the match in the middle of the
+        // viewport where there is room, then clamp to what exists.
+        let firstRow = match.row - rows / 2
+        let offset = max(0, min(history - firstRow, history))
+        guard offset != scrollOffset else { return }
+        scrollOffset = offset
+        scrollRemainder = 0
         needsDisplay = true
+        flashScroller()
     }
 
     override func doCommand(by selector: Selector) {
+        // The input method passed on a key it had no text for. Send it as the
+        // key it was, rather than beeping: the key table knows what it means.
+        if let event = pendingKeyEvent {
+            sendKey(event)
+            return
+        }
         // Swallow the system beep for keys we do not handle.
         if selector == #selector(NSResponder.insertNewline(_:)) { return }
         super.doCommand(by: selector)
+    }
+}
+
+// MARK: - Input methods
+
+extension TermView: NSTextInputClient {
+
+    /// Committed text: send it to the program.
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        let hadMarked = !markedText.isEmpty
+        markedText = ""
+        markedSelection = NSRange(location: 0, length: 0)
+        if hadMarked { needsDisplay = true }
+        guard !text.isEmpty else { return }
+        // A plain key that the input method handed straight back is sent through
+        // the key table, so its encoding is exactly what it was before input
+        // methods were involved. Composed text is sent as the text it is.
+        if !hadMarked, let event = pendingKeyEvent, event.characters == text {
+            sendKey(event)
+            return
+        }
+        onInput?(Array(text.utf8))
+    }
+
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        markedText = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        markedSelection = selectedRange
+        needsDisplay = true
+    }
+
+    func unmarkText() {
+        guard !markedText.isEmpty else { return }
+        markedText = ""
+        needsDisplay = true
+    }
+
+    func hasMarkedText() -> Bool { !markedText.isEmpty }
+
+    func markedRange() -> NSRange {
+        markedText.isEmpty
+            ? NSRange(location: NSNotFound, length: 0)
+            : NSRange(location: 0, length: (markedText as NSString).length)
+    }
+
+    func selectedRange() -> NSRange {
+        markedText.isEmpty ? NSRange(location: 0, length: 0) : markedSelection
+    }
+
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
+
+    func attributedSubstring(forProposedRange range: NSRange,
+                             actualRange: NSRangePointer?) -> NSAttributedString? { nil }
+
+    func characterIndex(for point: NSPoint) -> Int { NSNotFound }
+
+    /// Where the cursor is on screen, so the candidate window and the accent
+    /// picker open beside the text rather than in a corner of the display.
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        let cursor = screen.cursor
+        let origin = cellOrigin(col: cursor.col, row: cursor.row)
+        let rect = NSRect(x: origin.x, y: origin.y, width: cellWidth, height: cellHeight)
+        guard let window else { return rect }
+        return window.convertToScreen(convert(rect, to: nil))
+    }
+
+    /// The composition, drawn over the cursor's cell onward: on the terminal's
+    /// own background, in its own ink, underlined the way the system marks
+    /// unfinished text.
+    fileprivate func drawMarkedText(_ ctx: CGContext) {
+        let cursor = screen.cursor
+        let origin = cellOrigin(col: cursor.col, row: cursor.row)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(
+            string: markedText,
+            attributes: [
+                .init(kCTFontAttributeName as String): font,
+                .init(kCTForegroundColorAttributeName as String): theme.foreground,
+            ]
+        ))
+        let width = max(cellWidth, ceil(CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))))
+        ctx.setFillColor(theme.background)
+        ctx.fill(CGRect(x: origin.x, y: origin.y, width: width, height: cellHeight))
+        ctx.textPosition = CGPoint(x: origin.x, y: baseline(row: cursor.row))
+        CTLineDraw(line, ctx)
+        ctx.setFillColor(theme.foreground)
+        ctx.fill(CGRect(x: origin.x, y: origin.y + 1, width: width, height: 1))
+        // A thin bar where the input method's insertion point is.
+        let caret = CTLineGetOffsetForStringIndex(line, markedSelection.location, nil)
+        ctx.setFillColor(theme.cursor)
+        ctx.fill(CGRect(x: origin.x + caret, y: origin.y, width: 2, height: cellHeight))
+    }
+}
+
+/// The pane's scrollbar. A wheel over it scrolls the terminal, which owns the
+/// viewport, rather than the scroller on its own.
+private final class TerminalScroller: NSScroller {
+    override func scrollWheel(with event: NSEvent) {
+        superview?.scrollWheel(with: event)
     }
 }

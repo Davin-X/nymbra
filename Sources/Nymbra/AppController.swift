@@ -96,6 +96,15 @@ final class AppController: NSObject {
         // A split can fail after the window is up, and a shell that will not start
         // is the one failure that leaves nothing on screen to explain itself.
         window.onSpawnFailure = { [weak self] error in self?.cannotStartShell(error) }
+        // The window's own buttons (title bar, path bar) run the same commands
+        // the menus and the palette do.
+        window.onCommand = { [weak self] command in
+            if command == .commandPalette {
+                self?.showCommandPalette(nil)
+            } else {
+                self?.performPaletteCommand(command)
+            }
+        }
         windows.append(window)
         window.makeKeyAndOrderFront()
         return window
@@ -189,8 +198,13 @@ final class AppController: NSObject {
     /// terminal changing, not a mock-up.
     func apply(_ configuration: Configuration) {
         let shortcutsChanged = self.configuration.keyboard.overrides != configuration.keyboard.overrides
+        let promptChanged = self.configuration.appearance.promptStyle != configuration.appearance.promptStyle
+            || self.configuration.appearance.promptStyleApplied != configuration.appearance.promptStyleApplied
         self.configuration = configuration
         for window in windows { window.apply(configuration) }
+        if promptChanged {
+            for window in windows { window.applyPromptStyle(configuration) }
+        }
         commandPaletteController?.reload(configuration: configuration)
         if shortcutsChanged {
             AppMenu.install(controller: self, configuration: configuration)
@@ -247,6 +261,9 @@ final class AppController: NSObject {
         if settingsController == nil {
             settingsController = SettingsWindowController(configuration: configuration) { [weak self] updated in
                 self?.apply(updated)
+            }
+            settingsController?.onApplyPrompt = { [weak self] updated in
+                self?.windows.forEach { $0.applyPromptStyle(updated) }
             }
         }
         settingsController?.reload(from: configuration)

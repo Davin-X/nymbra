@@ -34,4 +34,14 @@ pid_t cpty_spawn(int *master, unsigned short rows, unsigned short cols,
 /* Tell the kernel the window changed size (TIOCSWINSZ). */
 int cpty_resize(int master, unsigned short rows, unsigned short cols);
 
+/* The current working directory of process `pid`, written to `buffer` as a
+ * NUL-terminated path. Returns 0, or -1 when the process is gone or not ours
+ * to inspect. This is how the terminal knows where a shell is without the
+ * shell having to say so (OSC 7), the same way Terminal.app does. */
+int cpty_process_cwd(pid_t pid, char *buffer, size_t length);
+
+/* The short name of process `pid` (`vim`, `npm`), as `proc_name` reports it.
+ * Returns 0, or -1 when it cannot be read. */
+int cpty_process_name(pid_t pid, char *buffer, size_t length);
+
 #endif /* CPTY_H */

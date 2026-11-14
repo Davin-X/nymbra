@@ -29,6 +29,22 @@ ignored. A terminal must never refuse to start because of its own settings file.
 |-----|------|---------|-------|
 | `fontFamily` | string | `"Menlo"` | Must resolve to a monospaced family; falls back silently to Menlo |
 | `fontSize` | number | `13.0` | Clamped to `6.0...72.0` |
+| `promptStyle` | string | `"git"` | One of `git`, `robbyrussell`, `pure`, `agnoster`, `starship`, `spaceship`, `kali`, `powerlevel10k` |
+| `promptStyleApplied` | boolean | `false` | Give new zsh shells the chosen prompt; an unknown style falls back to `git` |
+
+### Prompt style
+
+`promptStyle` names the shape the settings gallery previews: which pieces appear,
+in what order, in which palette colour, and whether a piece is a filled block.
+`promptStyleApplied` is what makes it real. When it is on, Nymbra generates the
+zsh `PROMPT` from the selected style and starts new zsh shells with it; picking a
+card in the gallery turns it on.
+
+It is independent of `shellIntegration`. A prompt does not turn command marking
+on, and marking does not replace the prompt. Only zsh is supported, only shells
+started afterwards are affected, and Nymbra never edits your startup files: the
+prompt travels in the environment of the child shell, through the same generated
+`ZDOTDIR` described below.
 
 ## colours
 
@@ -124,7 +140,9 @@ Command names: `copy`, `paste`, `selectAll`, `clearBuffer`, `settings`,
 {
   "appearance": {
     "fontFamily": "Menlo",
-    "fontSize": 14
+    "fontSize": 14,
+    "promptStyle": "pure",
+    "promptStyleApplied": true
   },
   "colours": {
     "preset": "dark",

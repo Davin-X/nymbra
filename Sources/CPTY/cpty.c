@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <libproc.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -160,4 +161,18 @@ int cpty_resize(int master, unsigned short rows, unsigned short cols) {
     ws.ws_xpixel = 0;
     ws.ws_ypixel = 0;
     return ioctl(master, TIOCSWINSZ, &ws);
+}
+
+int cpty_process_cwd(pid_t pid, char *buffer, size_t length) {
+    struct proc_vnodepathinfo info;
+    if (pid <= 0 || length == 0) return -1;
+    int size = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, sizeof info);
+    if (size != (int)sizeof info || info.pvi_cdir.vip_path[0] == 0) return -1;
+    strlcpy(buffer, info.pvi_cdir.vip_path, length);
+    return 0;
+}
+
+int cpty_process_name(pid_t pid, char *buffer, size_t length) {
+    if (pid <= 0 || length == 0) return -1;
+    return proc_name(pid, buffer, (uint32_t)length) > 0 ? 0 : -1;
 }

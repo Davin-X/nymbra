@@ -1,3 +1,4 @@
+import CPTY
 import Darwin
 import Foundation
 
@@ -5,14 +6,22 @@ import Foundation
 /// those bytes describe.
 ///
 /// Threading (docs/ARCHITECTURE.md): one reader thread blocks on the PTY master.
-/// Every chunk is handed to `deliveryQueue` — the main queue in the application —
+/// Its chunks are handed to `deliveryQueue` — the main queue in the application —
 /// where the parser mutates the screen and `onUpdate` fires. The screen is
 /// therefore only ever touched on one thread, which is why it needs no locking.
+///
+/// Chunks are coalesced: while one delivery is waiting for its turn on the
+/// queue, further chunks join it rather than queueing deliveries of their own.
+/// Under a flood (`cat` of a large file) that turns hundreds of parse-and-notify
+/// rounds into one per turn of the main queue, so `onUpdate` — and everything
+/// the window hangs off it — runs once for all of them.
 public final class Terminal {
     public let screen: Screen
     public let parser: Parser
     public let master: Int32
     public let pid: pid_t
+    /// The shell this terminal is running, as an absolute path.
+    public let shellPath: String
 
     /// Called on `deliveryQueue` after output has been parsed.
     public var onUpdate: (() -> Void)?
@@ -28,6 +37,12 @@ public final class Terminal {
     private let deliveryQueue: DispatchQueue
     private var started = false
 
+    /// Bytes read but not yet parsed, and whether a delivery is already queued
+    /// to parse them. Shared between the reader thread and `deliveryQueue`.
+    private let pendingLock = NSLock()
+    private var pending: [UInt8] = []
+    private var deliveryScheduled = false
+
     /// Spawn `shell` — or the user's login shell — in a `size` grid.
     ///
     /// The grid is one value rather than two integers so that the rows and the
@@ -41,10 +56,19 @@ public final class Terminal {
         size: GridSize,
         shell: String? = nil,
         deliveryQueue: DispatchQueue = .main,
-        integration: ShellIntegration? = nil
+        integration: ShellIntegration? = nil,
+        workingDirectory: String? = nil
     ) throws {
+        // A directory that has gone since it was asked about is not a reason to
+        // fail: the shell starts in the default one instead.
+        let directory = workingDirectory.flatMap { path -> String? in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                && isDirectory.boolValue ? path : nil
+        }
+        self.shellPath = resolveShell(shell)
         let pty = try spawnShell(rows: size.rows, cols: size.cols, shell: shell,
-                                 integration: integration)
+                                 workingDirectory: directory, integration: integration)
         let screen = Screen(rows: size.rows, cols: size.cols)
         self.master = pty.master
         self.pid = pty.pid
@@ -69,11 +93,13 @@ public final class Terminal {
         while true {
             let count = ptyRead(master, into: &chunk)
             if count <= 0 { break }
-            let bytes = Array(chunk[0..<count])
-            deliveryQueue.async { [weak self] in
-                guard let self else { return }
-                self.parser.feed(bytes)
-                self.onUpdate?()
+            pendingLock.lock()
+            pending.append(contentsOf: chunk[0..<count])
+            let schedule = !deliveryScheduled
+            deliveryScheduled = true
+            pendingLock.unlock()
+            if schedule {
+                deliveryQueue.async { [weak self] in self?.deliverPending() }
             }
         }
         deliveryQueue.async { [weak self] in
@@ -81,6 +107,21 @@ public final class Terminal {
             self.isRunning = false
             self.onExit?()
         }
+    }
+
+    /// Parse everything read since the last delivery, then say so once.
+    ///
+    /// The exit notification is queued after the reader's last delivery, so on
+    /// a serial queue every byte is parsed before `onExit` runs.
+    private func deliverPending() {
+        pendingLock.lock()
+        let bytes = pending
+        pending.removeAll(keepingCapacity: true)
+        deliveryScheduled = false
+        pendingLock.unlock()
+        guard !bytes.isEmpty else { return }
+        parser.feed(bytes)
+        onUpdate?()
     }
 
     /// True until the shell exits or the PTY reaches end of file.
@@ -101,6 +142,37 @@ public final class Terminal {
         return foreground != -1 && foreground != pid
     }
 
+    // MARK: - Where it is, and what it is running
+
+    /// The process group in the terminal's foreground, when it is not the shell.
+    private var foregroundJob: pid_t? {
+        let group = tcgetpgrp(master)
+        return group > 0 && group != pid ? group : nil
+    }
+
+    /// The program in the foreground, when it is not the shell itself: `vim`,
+    /// `npm`, `ssh`. `nil` while the shell is at its prompt. Read from the
+    /// kernel, so it works whether or not shell integration is on.
+    public var foregroundProgram: String? {
+        guard isRunning, let job = foregroundJob else { return nil }
+        var buffer = [CChar](repeating: 0, count: 256)
+        guard cpty_process_name(job, &buffer, buffer.count) == 0 else { return nil }
+        let name = String(cString: buffer)
+        return name.isEmpty ? nil : name
+    }
+
+    /// Where the shell is. What the shell reported with `OSC 7` wins (it is the
+    /// only right answer over `ssh`); otherwise the kernel is asked for the
+    /// shell's working directory, the way Terminal.app does — so a tab knows its
+    /// folder with shell integration off.
+    public var currentDirectory: String? {
+        if let reported = screen.reportedDirectory { return reported }
+        guard isRunning else { return nil }
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard cpty_process_cwd(pid, &buffer, buffer.count) == 0 else { return nil }
+        return String(cString: buffer)
+    }
+
     // MARK: - Input
 
     public func send(_ bytes: [UInt8]) {
@@ -109,6 +181,21 @@ public final class Terminal {
 
     public func send(_ text: String) {
         send(Array(text.utf8))
+    }
+
+    /// Send input without it being echoed by the terminal's line discipline.
+    ///
+    /// Used for housekeeping commands Nymbra runs on a shell's behalf (such as
+    /// installing a chosen prompt): the command does its work and the shell's own
+    /// prompt comes back, but the command itself never appears on the screen.
+    /// Echo is restored shortly afterwards, so a slow shell cannot leave the
+    /// terminal deaf to what the person types.
+    public func sendSilently(_ text: String) {
+        // There is no way to hide typed input from a shell that is already
+        // running: the line discipline echoes it before the command executes.
+        // The command is kept short, and it prints a single short confirmation
+        // instead of the command itself, so the noise on the screen is minimal.
+        send(text)
     }
 
     /// Resize both the model and the PTY, so the shell sees `SIGWINCH` and knows
