@@ -1,3 +1,5 @@
+import Foundation
+
 /// The byte-level VT parser.
 ///
 /// One state machine handles every sequence family, because they share the
@@ -422,17 +424,31 @@ public final class Parser {
             collectClear()
             state = .ground
         }
-        // Everything is `Ps ; Pt`. We act on the title and on the shell marks and
-        // deliberately ignore the rest: no clipboard writes (OSC 52), no colour
-        // changes (OSC 4/10), no hyperlinks yet (OSC 8).
+        // Everything is `Ps ; Pt`. We act on the title, the working directory
+        // and the shell marks, and deliberately ignore the rest: no clipboard
+        // writes (OSC 52), no colour changes (OSC 4/10), no hyperlinks yet (OSC 8).
         guard let separator = stringBuffer.firstIndex(of: 0x3B) else { return }
         let command = String(decoding: stringBuffer[..<separator], as: UTF8.self)
         let payload = String(decoding: stringBuffer[stringBuffer.index(after: separator)...], as: UTF8.self)
         switch command {
         case "0", "2": screen.title = payload
+        case "7": if let path = Self.directory(fromOSC7: payload) { screen.reportedDirectory = path }
         case "133": shellMark(payload)
         default: break
         }
+    }
+
+    /// `OSC 7 ; file://host/path` — the shell saying where it is. The path is
+    /// percent-encoded; the host is ignored (the path is shown either way, and
+    /// a remote host's path is still the right thing to show for that shell).
+    /// Anything that is not a `file:` URL with an absolute path is dropped.
+    static func directory(fromOSC7 payload: String) -> String? {
+        guard payload.hasPrefix("file://") else { return nil }
+        let rest = payload.dropFirst("file://".count)
+        guard let slash = rest.firstIndex(of: "/") else { return nil }
+        let encoded = String(rest[slash...])
+        guard let path = encoded.removingPercentEncoding, path.hasPrefix("/") else { return nil }
+        return path
     }
 
     /// `OSC 133 ; <mark>` — the shell reporting its own progress, which is the

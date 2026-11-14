@@ -35,9 +35,8 @@ final class TabChipView: NSView {
 
     var isSelected = false {
         didSet {
-            titleField.textColor = isSelected ? .labelColor : .secondaryLabelColor
             closeButton.isHidden = !(isSelected || hovered)
-            closeButton.contentTintColor = (isSelected || hovered) ? .labelColor : .secondaryLabelColor
+            applyTextColours()
             needsDisplay = true
         }
     }
@@ -56,12 +55,30 @@ final class TabChipView: NSView {
     private var hovered = false {
         didSet {
             closeButton.isHidden = !(isSelected || hovered)
-            closeButton.contentTintColor = (isSelected || hovered) ? .labelColor : .secondaryLabelColor
+            applyTextColours()
             needsDisplay = true
         }
     }
 
     private var tracking: NSTrackingArea?
+
+    /// The window's chrome colours. `nil` falls back to the system's.
+    var chrome: Theme.Chrome? {
+        didSet { applyTextColours(); needsDisplay = true }
+    }
+
+    private func applyTextColours() {
+        let active = isSelected || hovered
+        titleField.textColor = isSelected ? (chrome?.text ?? .labelColor)
+                                          : (chrome?.secondaryText ?? .secondaryLabelColor)
+        iconField.textColor = chrome?.tertiaryText ?? .tertiaryLabelColor
+        closeButton.contentTintColor = active ? (chrome?.secondaryText ?? .labelColor)
+                                              : (chrome?.tertiaryText ?? .secondaryLabelColor)
+        if let busy = chrome?.busy {
+            unreadDot.layer?.backgroundColor = busy.cgColor
+            unreadDot.layer?.shadowColor = busy.withAlphaComponent(0.4).cgColor
+        }
+    }
 
     /// How wide this chip wants to be: its name, plus room for the close button,
     /// clamped so that one long title cannot take the whole strip.
@@ -136,6 +153,7 @@ final class TabChipView: NSView {
     }
 
     private func applyLayerColors() {
+        guard chrome == nil else { return applyTextColours() }
         effectiveAppearance.performAsCurrentDrawingAppearance {
             unreadDot.layer?.backgroundColor = NSColor.systemYellow.cgColor
             unreadDot.layer?.shadowColor = NSColor.systemYellow.withAlphaComponent(0.4).cgColor
@@ -195,16 +213,18 @@ final class TabChipView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let selected = isSelected
         guard selected || hovered else { return }
-        let rect = bounds.insetBy(dx: 2, dy: 1)
+        // Flat, the way the concept draws them: the tab in front is raised a
+        // step from the strip, with a hairline edge; a hovered one is a half step.
+        let rect = bounds.insetBy(dx: 2, dy: 2)
         let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
         if selected {
-            NSColor.selectedContentBackgroundColor.withAlphaComponent(0.22).setFill()
+            (chrome?.raised ?? NSColor.labelColor.withAlphaComponent(0.12)).setFill()
             path.fill()
-            NSColor.selectedContentBackgroundColor.withAlphaComponent(0.55).setStroke()
-            path.lineWidth = 1
+            (chrome?.border ?? NSColor.separatorColor).setStroke()
+            path.lineWidth = 0.5
             path.stroke()
         } else {
-            NSColor.labelColor.withAlphaComponent(0.08).setFill()
+            (chrome?.hover ?? NSColor.labelColor.withAlphaComponent(0.06)).setFill()
             path.fill()
         }
     }
@@ -222,7 +242,7 @@ final class TabChipView: NSView {
 /// floating in the middle, and a drag from one chip to another changes the order
 /// without changing anything else. That also makes every one of those facts
 /// checkable from the frames — no screenshot required.
-final class TabBarView: NSVisualEffectView {
+final class TabBarView: NSView {
     /// One tab as the strip holds it: what it is called, the view to show when it
     /// is in front, and the chip that represents it.
     final class Tab {
@@ -297,12 +317,8 @@ final class TabBarView: NSVisualEffectView {
 
     init() {
         super.init(frame: .zero)
-        material = .headerView
-        blendingMode = .withinWindow
-        state = .followsWindowActiveState
         wantsLayer = true
         layer?.masksToBounds = false
-        layer?.borderWidth = 0.5
         setAccessibilityLabel("Tabs")
 
         // Configure scroll view for horizontal scrolling
@@ -326,8 +342,6 @@ final class TabBarView: NSVisualEffectView {
         tabCounterLabel.textColor = .secondaryLabelColor
         tabCounterLabel.alignment = .center
         tabCounterLabel.translatesAutoresizingMaskIntoConstraints = false
-        tabCounterLabel.wantsLayer = true
-        tabCounterLabel.layer?.cornerRadius = 8
         addSubview(tabCounterLabel)
 
         // The `+` is placed by frame in `layout()`, not by constraints: NSButton's
@@ -342,8 +356,6 @@ final class TabBarView: NSVisualEffectView {
         plusButton.target = self
         plusButton.action = #selector(addPressed(_:))
         plusButton.toolTip = "New Tab"
-        plusButton.wantsLayer = true
-        plusButton.layer?.cornerRadius = 7
         addSubview(plusButton)
 
         attentionButton.image = NSImage(systemSymbolName: "exclamationmark.circle.fill",
@@ -387,10 +399,30 @@ final class TabBarView: NSVisualEffectView {
     }
 
     private func applyLayerColors() {
+        guard chrome == nil else { return }
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.6).cgColor
-            tabCounterLabel.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
-            plusButton.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+            layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        }
+    }
+
+    /// A hairline along the bottom edge, between the strip and the path bar.
+    override func draw(_ dirtyRect: NSRect) {
+        guard let chrome else { return }
+        chrome.border.setFill()
+        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
+    }
+
+    /// The window's chrome colours: the strip is the same surface as the title
+    /// bar above it and the path bar below, so the three read as one.
+    var chrome: Theme.Chrome? {
+        didSet {
+            guard let chrome else { return applyLayerColors() }
+            layer?.backgroundColor = chrome.background.cgColor
+            tabCounterLabel.textColor = chrome.tertiaryText
+            plusButton.contentTintColor = chrome.secondaryText
+            attentionButton.contentTintColor = chrome.busy
+            for tab in tabs { tab.chip.chrome = chrome }
+            needsDisplay = true
         }
     }
 
@@ -407,6 +439,7 @@ final class TabBarView: NSVisualEffectView {
     func insert(_ tab: Tab, at index: Int) {
         let place = min(max(index, 0), tabs.count)
         tabs.insert(tab, at: place)
+        tab.chip.chrome = chrome
         updateTabCounter()
         tab.chip.onSelect = { [weak self] in self?.selectAndTell(tab.identifier) }
         tab.chip.onDrop = { [weak self] point in
@@ -519,7 +552,7 @@ final class TabBarView: NSVisualEffectView {
 
     override func layout() {
         // Leave room for the counter, optional attention indicator, and plus button.
-        let counterWidth = max(tabCounterLabel.intrinsicContentSize.width + 14, 46)
+        let counterWidth = max(tabCounterLabel.intrinsicContentSize.width + 8, 40)
         let trailingInset = TabBarView.trailingInset
         let gap = TabBarView.clusterGap
         let attentionW: CGFloat = attentionButton.isHidden ? 0 : TabBarView.attentionWidth
@@ -550,8 +583,12 @@ final class TabBarView: NSVisualEffectView {
                                   height: TabBarView.scrollViewHeight)
 
         let counterX = plusButton.frame.minX - gap - counterWidth
-        tabCounterLabel.frame = NSRect(x: counterX, y: 1,
-                                      width: counterWidth, height: TabBarView.scrollViewHeight)
+        // A label draws from the top of its frame, so a frame as tall as the
+        // strip puts the text high. Centre a frame of the text's own height.
+        let counterHeight = tabCounterLabel.intrinsicContentSize.height
+        tabCounterLabel.frame = NSRect(x: counterX,
+                                      y: ((bounds.height - counterHeight) / 2).rounded(),
+                                      width: counterWidth, height: counterHeight)
 
         if !attentionButton.isHidden {
             attentionButton.frame = NSRect(x: counterX - gap - attentionW, y: 1,

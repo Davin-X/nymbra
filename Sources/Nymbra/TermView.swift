@@ -33,8 +33,10 @@ final class TermView: NSView {
     private var cellHeight: CGFloat
     private var ascent: CGFloat
     private var descent: CGFloat
-    private let paddingX: CGFloat = 10
-    private let paddingY: CGFloat = 8
+    // Room around the grid, so text does not sit against the window's edge —
+    // the breathing space the concept gives the canvas.
+    private let paddingX: CGFloat = 14
+    private let paddingY: CGFloat = 10
 
     private(set) var cols: Int
     private(set) var rows: Int

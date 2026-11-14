@@ -96,6 +96,15 @@ final class AppController: NSObject {
         // A split can fail after the window is up, and a shell that will not start
         // is the one failure that leaves nothing on screen to explain itself.
         window.onSpawnFailure = { [weak self] error in self?.cannotStartShell(error) }
+        // The window's own buttons (title bar, path bar) run the same commands
+        // the menus and the palette do.
+        window.onCommand = { [weak self] command in
+            if command == .commandPalette {
+                self?.showCommandPalette(nil)
+            } else {
+                self?.performPaletteCommand(command)
+            }
+        }
         windows.append(window)
         window.makeKeyAndOrderFront()
         return window

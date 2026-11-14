@@ -264,6 +264,10 @@ public struct ShellIntegration: Sendable {
         printf '\e]133;D;%d\a' "$__nymbra_status"
         __nymbra_running=0
       fi
+      # Where the shell is (OSC 7), percent-encoded the same way as the command,
+      # so it is right over ssh and for paths with spaces.
+      __nymbra_encode "$PWD"
+      printf '\e]7;file://%s%s\a' "${HOST-}" "$__nymbra_encoded"
       printf '\e]133;A\a'
     }
 

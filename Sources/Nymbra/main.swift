@@ -109,6 +109,12 @@ if CommandLine.arguments.contains("--tabs-test") {
     exit(runTabsTest(configuration: settings) ? 0 : 1)
 }
 
+// Knowing where you are: tab and window titles and the path bar follow the
+// shell's folder and running program, read from the kernel.
+if CommandLine.arguments.contains("--location-test") {
+    exit(runLocationTest(configuration: settings) ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--mouse-test") {
     exit(runMouseTest() ? 0 : 1)
 }

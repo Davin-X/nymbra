@@ -27,14 +27,29 @@ final class TerminalTab {
         didSet { host?.refreshTitle() }
     }
 
-    /// The name this tab is known by, in the strip and anywhere else.
-    var displayName: String {
-        if let customTitle, !customTitle.isEmpty { return customTitle }
-        let title = panes[focusedPane]?.title ?? ""
-        return title.isEmpty ? "Nymbra" : title
+    /// What is known about the focused pane's shell: what it is running,
+    /// where, and what anything has asked to call it. See `TerminalTitle`.
+    var titleFacts: TerminalTitle.Facts {
+        let pane = panes[focusedPane]
+        return TerminalTitle.Facts(customTitle: customTitle,
+                                   programTitle: pane?.title ?? "",
+                                   foregroundProgram: pane?.terminal.foregroundProgram,
+                                   directory: pane?.terminal.currentDirectory,
+                                   shellPath: pane?.terminal.shellPath)
     }
 
-    init(configuration: Configuration) throws {
+    /// The name this tab is known by, in the strip and anywhere else: the
+    /// folder or the running program, never the application's name.
+    var displayName: String { TerminalTitle.tabName(titleFacts) }
+
+    /// Where the focused pane's shell is, for a new tab or split to start in.
+    var currentDirectory: String? { panes[focusedPane]?.terminal.currentDirectory }
+
+    /// The directory the first shell starts in; `nil` is the default.
+    private let initialDirectory: String?
+
+    init(configuration: Configuration, workingDirectory: String? = nil) throws {
+        self.initialDirectory = workingDirectory
         self.configuration = configuration
         let first = TerminalTab.firstPane
         self.layout = PaneLayout(first)
@@ -46,7 +61,7 @@ final class TerminalTab {
         container.onDividerMoved = { [weak self] divider, position in
             self?.moveDivider(divider, to: position)
         }
-        let firstPane = try makePane(id: first)
+        let firstPane = try makePane(id: first, workingDirectory: initialDirectory)
         panes[first] = firstPane
         applyLayout()
         firstPane.terminal.resize(firstPane.view.grid)
@@ -54,14 +69,15 @@ final class TerminalTab {
         updateTitle()
     }
 
-    private func makePane(id: PaneID) throws -> Pane {
+    private func makePane(id: PaneID, workingDirectory: String? = nil) throws -> Pane {
         // The integration is asked for here, once per shell, rather than held
         // on the tab: it is the environment the shell is born with, and a shell
         // already running cannot be given a new one. A settings change therefore
         // reaches panes and tabs opened after it.
         let terminal = try Terminal(size: GridSize(rows: 24, cols: 80),
                                     shell: configuration.shell.path,
-                                    integration: configuration.shellIntegration())
+                                    integration: configuration.shellIntegration(),
+                                    workingDirectory: workingDirectory)
         let view = TermView(frame: container.bounds,
                             screen: terminal.screen,
                             configuration: configuration)
@@ -109,7 +125,8 @@ final class TerminalTab {
         nextPaneID += 1
         let pane: Pane
         do {
-            pane = try makePane(id: id)
+            // A split starts where the pane it splits is, the way a new tab does.
+            pane = try makePane(id: id, workingDirectory: currentDirectory)
         } catch {
             onSpawnFailure?(error)
             return false

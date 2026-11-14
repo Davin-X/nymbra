@@ -23,6 +23,18 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     /// fourth.
     private let paneHost = NSView()
     private let contentView = NSView()
+    /// Where the shell is and what it is doing, under the tabs.
+    let pathBar = PathBarView()
+    /// The search, more and settings buttons at the right of the title bar.
+    private let titlebarAccessory = NSTitlebarAccessoryViewController()
+    /// Re-reads the folder and program of the tab in front. A program that
+    /// starts without printing (`sleep 60`) changes nothing on screen, so the
+    /// title would not otherwise notice it.
+    private var titleTimer: Timer?
+
+    /// Run an application command — what the title bar's buttons and the path
+    /// bar's hint do. Set by the controller, which owns the commands.
+    var onCommand: ((Command) -> Void)?
     private let findBar = FindBarView()
     private let findSearchField = NSSearchField()
     private let findCaseButton = NSButton()
@@ -81,7 +93,10 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         self.tabBar = TabBarView()
         self.window = NSWindow(
             contentRect: frame,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            // Full-size content under a transparent title bar: the title bar, the
+            // strip and the path bar are one surface, not a system bar on top
+            // of an app bar.
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -89,6 +104,8 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
 
         window.delegate = self
         window.title = "Nymbra"
+        window.titlebarAppearsTransparent = true
+        contentView.wantsLayer = true
         window.contentView = contentView
         window.setContentSize(frame.size)
         window.center()
@@ -99,9 +116,13 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         window.contentMinSize = NSSize(width: 420, height: 260)
 
         contentView.addSubview(tabBar)
+        contentView.addSubview(pathBar)
         contentView.addSubview(paneHost)
         tabBar.translatesAutoresizingMaskIntoConstraints = false
+        pathBar.translatesAutoresizingMaskIntoConstraints = false
         paneHost.translatesAutoresizingMaskIntoConstraints = false
+        // Under the title bar, which the content now extends beneath.
+        let top = (window.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? contentView.topAnchor
         NSLayoutConstraint.activate([
             // The strip takes the top edge, and the terminal takes everything
             // below it — to the left, right and bottom edges of the window. A
@@ -109,15 +130,29 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
             // terminal with less room than the window has.
             tabBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             tabBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            tabBar.topAnchor.constraint(equalTo: contentView.topAnchor),
+            tabBar.topAnchor.constraint(equalTo: top),
             tabBar.heightAnchor.constraint(equalToConstant: 30),
+            pathBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            pathBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            pathBar.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            pathBar.heightAnchor.constraint(equalToConstant: PathBarView.height),
             paneHost.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             paneHost.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             paneHost.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            paneHost.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            paneHost.topAnchor.constraint(equalTo: pathBar.bottomAnchor),
         ])
         configureFindBar()
+        configureTitlebar()
         updateNewTabTooltip()
+        applyChrome()
+        pathBar.onRevealPath = { path in
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+        }
+        pathBar.onCommandPalette = { [weak self] in self?.onCommand?(.commandPalette) }
+        titleTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self, self.window.isVisible else { return }
+            self.refreshTitle()
+        }
 
         // A window that will not be a tab of somebody else's window. Nymbra's tabs
         // are inside it (see the note in `main.swift`); the system's would be a
@@ -178,7 +213,10 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
 
         let tab: TerminalTab
         do {
-            tab = try TerminalTab(configuration: configuration)
+            // A new tab opens where the person is, which is what every terminal
+            // with a notion of "where" does.
+            tab = try TerminalTab(configuration: configuration,
+                                  workingDirectory: tabs[focusedTab]?.currentDirectory)
         } catch {
             onSpawnFailure?(error)
             return false
@@ -603,6 +641,87 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         self.configuration = configuration
         for tab in tabs.values { tab.apply(configuration) }
         updateNewTabTooltip()
+        applyChrome()
+        refreshTitle()
+    }
+
+    /// Colour the window from the theme: title bar, strip and path bar are the
+    /// canvas lifted a step, and the window's appearance follows the palette so
+    /// the traffic lights and the title read correctly on it.
+    private func applyChrome() {
+        let chrome = Theme(configuration).chrome
+        window.appearance = NSAppearance(named: chrome.isDark ? .darkAqua : .aqua)
+        window.backgroundColor = chrome.background
+        contentView.layer?.backgroundColor = chrome.background.cgColor
+        paneHost.wantsLayer = true
+        paneHost.layer?.backgroundColor = chrome.canvas.cgColor
+        tabBar.chrome = chrome
+        pathBar.apply(chrome)
+        for case let button as NSButton in titlebarAccessory.view.subviews.flatMap({ $0.subviews }) {
+            button.contentTintColor = chrome.secondaryText
+        }
+    }
+
+    /// Search, more and settings, at the right of the title bar — the three
+    /// things the concept keeps one click away.
+    private func configureTitlebar() {
+        func button(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
+            let button = NSButton()
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
+                .withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
+            button.imagePosition = .imageOnly
+            button.isBordered = false
+            button.toolTip = label
+            button.refusesFirstResponder = true
+            button.target = self
+            button.action = action
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.widthAnchor.constraint(equalToConstant: 26).isActive = true
+            return button
+        }
+        let stack = NSStackView(views: [
+            button("magnifyingglass", "Find", #selector(titlebarFind(_:))),
+            button("ellipsis.circle", "More", #selector(titlebarMore(_:))),
+            button("gearshape", "Settings", #selector(titlebarSettings(_:))),
+        ])
+        stack.spacing = 2
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 10)
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 28))
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        holder.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
+            stack.centerYAnchor.constraint(equalTo: holder.centerYAnchor),
+        ])
+        titlebarAccessory.view = holder
+        titlebarAccessory.layoutAttribute = .right
+        window.addTitlebarAccessoryViewController(titlebarAccessory)
+    }
+
+    @objc private func titlebarFind(_ sender: NSButton) { onCommand?(.find) }
+
+    @objc private func titlebarSettings(_ sender: NSButton) { onCommand?(.settings) }
+
+    @objc private func titlebarMore(_ sender: NSButton) {
+        let menu = NSMenu()
+        for command in [Command.newTab, .newWindow, .splitRight, .splitDown, .closePane,
+                        .clearBuffer, .commandPalette] {
+            let item = NSMenuItem(title: command.title, action: #selector(runMenuCommand(_:)), keyEquivalent: "")
+            if let shortcut = Command.shortcut(for: command, overrides: configuration.keyboard.overrides) {
+                item.keyEquivalent = shortcut.menuKey
+                item.keyEquivalentModifierMask = AppMenu.modifiers(of: shortcut.modifiers)
+            }
+            item.target = self
+            item.representedObject = command.rawValue
+            menu.addItem(item)
+            if command == .newWindow || command == .closePane { menu.addItem(.separator()) }
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    @objc private func runMenuCommand(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let command = Command(rawValue: raw) else { return }
+        onCommand?(command)
     }
 
     /// The `+` names the New Tab shortcut in force, not the default.
@@ -657,9 +776,11 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
     /// disagree with itself. A rename does not touch `unread`, so renaming cannot
     /// silently clear the mark.
     private func updateLabel(for id: TabID) {
-        guard let tab = tabs[id] else { return }
-        tab.stripItem?.isUnread = unread.contains(id)
-        tab.stripItem?.label = unread.contains(id) ? "\(tab.displayName) •" : tab.displayName
+        guard let tab = tabs[id], let item = tab.stripItem else { return }
+        let isUnread = unread.contains(id)
+        let label = isUnread ? "\(tab.displayName) •" : tab.displayName
+        if item.isUnread != isUnread { item.isUnread = isUnread }
+        if item.label != label { item.label = label }
     }
 
     /// Paint every tab's label.
@@ -773,6 +894,9 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         tabBar.setAttention(count: attentionInbox.count)
         deliver(announcement, id)
     }
+
+    /// What a tab is called right now, without the unread mark.
+    func tabLabel(_ id: TabID) -> String? { tabs[id]?.displayName }
 
     /// Bring one of this window's tabs to the front, if it still has it.
     ///
@@ -977,8 +1101,20 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
         // A shell that has gone says so, and only in the tab that is in front: the
         // notice is about what the person is looking at, not about a tab that
         // happened to finish something in the background.
-        let title = pane.terminal.isRunning ? pane.title : "Nymbra \u{2014} shell exited"
-        window.title = title.isEmpty ? "Nymbra" : title
+        let facts = tab.titleFacts
+        let title = pane.terminal.isRunning
+            ? TerminalTitle.windowTitle(facts)
+            : "\(tab.displayName) \u{2014} shell exited"
+        if window.title != title { window.title = title }
+        let status: PathBarView.Status = !pane.terminal.isRunning ? .exited
+            : facts.foregroundProgram.map { .running($0) } ?? .idle
+        pathBar.update(
+            path: facts.directory,
+            crumbs: facts.directory.map { TerminalTitle.breadcrumbs($0, home: facts.home) } ?? [],
+            status: status,
+            shell: (pane.terminal.shellPath as NSString).lastPathComponent,
+            paletteShortcut: Command.shortcut(for: .commandPalette,
+                                              overrides: configuration.keyboard.overrides)?.display)
         window.subtitle = tab.layout.count > 1 ? "\(tab.layout.count) panes" : ""
         updateAllLabels()
     }
@@ -1001,6 +1137,8 @@ final class TerminalWindow: NSObject, NSWindowDelegate, NSTextFieldDelegate, NSS
 
     func windowWillClose(_ notification: Notification) {
         isClosed = true
+        titleTimer?.invalidate()
+        titleTimer = nil
         for tab in tabs.values {
             for pane in tab.panes.values { pane.terminal.terminate() }
         }

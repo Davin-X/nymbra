@@ -296,14 +296,20 @@ func runTabsTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     //    in a frame drawn around it. Those are four edges and four assertions,
     //    because a strip that is drawn but overlapped by the content is a strip a
     //    person cannot click.
+    //    The content runs under a transparent title bar, so "the top edge" is the
+    //    bottom of the title bar (`contentLayoutRect`), and the path bar sits
+    //    between the strip and the terminal: strip, path bar, terminal, flush.
     let bar = window.tabBar
+    let path = window.pathBar.frame
     let content = window.window.contentView?.bounds ?? .zero
+    let usable = window.window.contentLayoutRect
     let host = window.paneHostFrame
     let stripVisible = bar.frame.height > 0
         && bar.frame.width == content.width
-        && bar.frame.maxY == content.height
+        && bar.frame.maxY == usable.maxY
+        && path.width == content.width && path.maxY == bar.frame.minY
         && host.minX == 0 && host.width == content.width
-        && host.minY == 0 && host.maxY == bar.frame.minY
+        && host.minY == 0 && host.maxY == path.minY
 
     //    And the tabs are laid out from the left, in order, with the `+` after the
     //    last of them rather than floating in the middle of the strip: the stock
@@ -558,4 +564,85 @@ func runMouseTest() -> Bool {
 
     print("mouse-test\t" + (failures == 0 ? "ok" : "FAIL"))
     return failures == 0
+}
+
+/// Knowing where you are: the tab, the window and the path bar follow the
+/// shell's folder and the program in front, with shell integration *off*, so
+/// what is proved is the kernel lookup rather than the shell's cooperation.
+func runLocationTest(configuration: Configuration) -> Bool { // swiftlint:disable:this function_body_length
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+
+    var quiet = configuration
+    quiet.behaviour.confirmBeforeClosingRunningSession = false
+    quiet.behaviour.shellIntegration = false
+
+    let window: TerminalWindow
+    do {
+        window = try TerminalWindow(configuration: quiet)
+    } catch {
+        print("location-test\tFAIL: no window: \(error)")
+        return false
+    }
+
+    func waitUntil(_ seconds: Double = 5, _ condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            window.refreshTitle()
+            if condition() { return true }
+        }
+        return false
+    }
+
+    // A folder of our own, with a space in its name, resolved the way the
+    // kernel reports it (`/tmp` is `/private/tmp`).
+    let base = URL(fileURLWithPath: NSTemporaryDirectory()).resolvingSymlinksInPath()
+    let folder = base.appendingPathComponent("nymbra location \(getpid())")
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let name = folder.lastPathComponent
+
+    guard let shell = window.focusedView.flatMap({ _ in window.panes[window.focusedPane]?.terminal }) else {
+        print("location-test\tFAIL: no shell")
+        return false
+    }
+    _ = waitUntil(3) { !shell.screen.dump().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    // The person cds: the tab is named after the folder, the window says where.
+    shell.send("cd '\(folder.path)'\n")
+    let tabNamed = waitUntil { window.tabLabel(window.focusedTab) == name }
+    let windowSays = window.window.title.hasPrefix(name)
+    let pathShown = window.pathBar.pathText.hasSuffix(name)
+    let idle = window.pathBar.statusText == "shell running"
+
+    // A program that prints nothing still shows: the tab and the bar name it.
+    shell.send("sleep 4\n")
+    let programNamed = waitUntil { window.tabLabel(window.focusedTab) == "sleep" }
+    let busy = window.pathBar.statusText == "running sleep"
+    shell.send("\u{03}")
+    let backToFolder = waitUntil { window.tabLabel(window.focusedTab) == name }
+
+    // A new tab opens where the person is.
+    let opened = window.newTab()
+    let newTabThere = opened && waitUntil {
+        // Compared through `realpath`: Foundation writes `/var/…` where the
+        // kernel reports `/private/var/…`, and both are the same folder.
+        window.panes[window.focusedPane]?.terminal.currentDirectory.map(realPath) == realPath(folder.path)
+    }
+    window.closeFocusedTab()
+
+    let ok = tabNamed && windowSays && pathShown && idle && programNamed && busy
+        && backToFolder && newTabThere
+    print("location-test\ttab=\(flag(tabNamed)) window=\(flag(windowSays)) path=\(flag(pathShown)) "
+          + "idle=\(flag(idle)) program=\(flag(programNamed)) busy=\(flag(busy)) "
+          + "back=\(flag(backToFolder)) newTabHere=\(flag(newTabThere))")
+    for pane in window.panes.values { pane.terminal.terminate() }
+    return ok
+}
+
+private func realPath(_ path: String) -> String {
+    guard let resolved = realpath(path, nil) else { return path }
+    defer { free(resolved) }
+    return String(cString: resolved)
 }

@@ -145,6 +145,10 @@ public final class Screen {
     public var mouseEncoding: MouseEncoding = .x10
     public var reverseVideo = false
     public var title = ""
+    /// The working directory the shell last reported with `OSC 7`, as a path.
+    /// Preferred over asking the OS, because it is the only answer that is right
+    /// inside `ssh`: the remote shell says where it is, the local process can't.
+    public var reportedDirectory: String?
 
     public private(set) var altScreenActive = false
     public private(set) var scrollback = Scrollback()

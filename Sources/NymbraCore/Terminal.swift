@@ -1,3 +1,4 @@
+import CPTY
 import Darwin
 import Foundation
 
@@ -19,6 +20,8 @@ public final class Terminal {
     public let parser: Parser
     public let master: Int32
     public let pid: pid_t
+    /// The shell this terminal is running, as an absolute path.
+    public let shellPath: String
 
     /// Called on `deliveryQueue` after output has been parsed.
     public var onUpdate: (() -> Void)?
@@ -53,10 +56,19 @@ public final class Terminal {
         size: GridSize,
         shell: String? = nil,
         deliveryQueue: DispatchQueue = .main,
-        integration: ShellIntegration? = nil
+        integration: ShellIntegration? = nil,
+        workingDirectory: String? = nil
     ) throws {
+        // A directory that has gone since it was asked about is not a reason to
+        // fail: the shell starts in the default one instead.
+        let directory = workingDirectory.flatMap { path -> String? in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                && isDirectory.boolValue ? path : nil
+        }
+        self.shellPath = resolveShell(shell)
         let pty = try spawnShell(rows: size.rows, cols: size.cols, shell: shell,
-                                 integration: integration)
+                                 workingDirectory: directory, integration: integration)
         let screen = Screen(rows: size.rows, cols: size.cols)
         self.master = pty.master
         self.pid = pty.pid
@@ -128,6 +140,37 @@ public final class Terminal {
     public var hasForegroundJob: Bool {
         let foreground = tcgetpgrp(master)
         return foreground != -1 && foreground != pid
+    }
+
+    // MARK: - Where it is, and what it is running
+
+    /// The process group in the terminal's foreground, when it is not the shell.
+    private var foregroundJob: pid_t? {
+        let group = tcgetpgrp(master)
+        return group > 0 && group != pid ? group : nil
+    }
+
+    /// The program in the foreground, when it is not the shell itself: `vim`,
+    /// `npm`, `ssh`. `nil` while the shell is at its prompt. Read from the
+    /// kernel, so it works whether or not shell integration is on.
+    public var foregroundProgram: String? {
+        guard isRunning, let job = foregroundJob else { return nil }
+        var buffer = [CChar](repeating: 0, count: 256)
+        guard cpty_process_name(job, &buffer, buffer.count) == 0 else { return nil }
+        let name = String(cString: buffer)
+        return name.isEmpty ? nil : name
+    }
+
+    /// Where the shell is. What the shell reported with `OSC 7` wins (it is the
+    /// only right answer over `ssh`); otherwise the kernel is asked for the
+    /// shell's working directory, the way Terminal.app does — so a tab knows its
+    /// folder with shell integration off.
+    public var currentDirectory: String? {
+        if let reported = screen.reportedDirectory { return reported }
+        guard isRunning else { return nil }
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard cpty_process_cwd(pid, &buffer, buffer.count) == 0 else { return nil }
+        return String(cString: buffer)
     }
 
     // MARK: - Input
