@@ -109,6 +109,11 @@ if CommandLine.arguments.contains("--tabs-test") {
     exit(runTabsTest(configuration: settings) ? 0 : 1)
 }
 
+// Composing text with an input method, and drawing a frame at once (DEC 2026).
+if CommandLine.arguments.contains("--input-test") {
+    exit(runInputTest(configuration: settings) ? 0 : 1)
+}
+
 // Knowing where you are: tab and window titles and the path bar follow the
 // shell's folder and running program, read from the kernel.
 if CommandLine.arguments.contains("--location-test") {

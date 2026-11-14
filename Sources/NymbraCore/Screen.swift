@@ -151,6 +151,10 @@ public final class Screen {
     public var reportedDirectory: String?
 
     public private(set) var altScreenActive = false
+    /// DEC mode 2026: the program is in the middle of a frame. The renderer
+    /// holds the last complete picture until the mode is reset, so an editor
+    /// redrawing a screen never shows half of the old one and half of the new.
+    public private(set) var synchronizedOutput = false
     public private(set) var scrollback = Scrollback()
     /// Whether each row was broken by the terminal itself (a soft wrap) rather
     /// than by a line feed. A soft-wrapped row is a continuation of the one
@@ -633,7 +637,31 @@ public final class Screen {
         case 1006: mouseEncoding = enabled ? .sgr : .x10
         case 1015: break                     // urxvt encoding: accepted, unused
         case 2004: bracketedPaste = enabled
+        case 2026: synchronizedOutput = enabled
         default: break
+        }
+    }
+
+    /// DECRQM's answer for a private mode: `1` set, `2` reset, `0` a mode this
+    /// terminal does not know. Programs ask before relying on a mode — Neovim
+    /// asks about 2026 — so "not recognised" has to be an honest answer.
+    public func privateModeState(_ mode: Int) -> Int {
+        func state(_ on: Bool) -> Int { on ? 1 : 2 }
+        switch mode {
+        case 1: return state(applicationCursorKeys)
+        case 5: return state(reverseVideo)
+        case 6: return state(originMode)
+        case 7: return state(autoWrap)
+        case 25: return state(cursor.visible)
+        case 47, 1047, 1049: return state(altScreenActive)
+        case 1000: return state(mouseMode == .click)
+        case 1002: return state(mouseMode == .drag)
+        case 1003: return state(mouseMode == .motion)
+        case 1004: return state(focusReporting)
+        case 1006: return state(mouseEncoding == .sgr)
+        case 2004: return state(bracketedPaste)
+        case 2026: return state(synchronizedOutput)
+        default: return 0
         }
     }
 
@@ -850,6 +878,7 @@ public final class Screen {
         applicationKeypad = false
         bracketedPaste = false
         focusReporting = false
+        synchronizedOutput = false
         mouseMode = .off
         mouseEncoding = .x10
         reverseVideo = false

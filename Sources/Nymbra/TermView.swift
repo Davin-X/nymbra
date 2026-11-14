@@ -73,6 +73,25 @@ final class TermView: NSView {
         return s
     }()
 
+    // MARK: Input method state
+
+    /// Text being composed by the input method and not yet committed: the
+    /// reading of a Japanese word, a dead key's accent. Drawn at the cursor,
+    /// underlined, and never sent to the program until it is committed.
+    private(set) var markedText = ""
+    private var markedSelection = NSRange(location: 0, length: 0)
+    /// The key press the input method is working on, so a key it hands back
+    /// with no text (`doCommand`) can still be sent as itself.
+    private var pendingKeyEvent: NSEvent?
+
+    /// The longest a program may hold a frame open (DEC 2026) before the view
+    /// draws anyway.
+    private var syncTimeout: Timer?
+
+    /// Whether the view is holding its last complete frame for a program that
+    /// is mid-frame (DEC 2026). For the proofs.
+    var isHoldingFrame: Bool { syncTimeout != nil }
+
     /// Cursor blink phase, and the timer that advances it.
     private var blinkOn = true
     private var blinkTimer: Timer?
@@ -316,8 +335,11 @@ final class TermView: NSView {
         for (row, line) in lines.enumerated() { drawRow(line, row: row, ctx: ctx) }
 
         // The cursor belongs to the live screen, so it is not drawn while the
-        // viewport sits up in scrollback.
-        if scrollOffset == 0 { drawCursor(ctx) }
+        // viewport sits up in scrollback. Text being composed sits where the
+        // cursor is, in its place.
+        if scrollOffset == 0 {
+            if markedText.isEmpty { drawCursor(ctx) } else { drawMarkedText(ctx) }
+        }
 
     }
 
@@ -573,6 +595,23 @@ final class TermView: NSView {
         returnToLiveScreen()
         restartBlink()
 
+        // Text goes through the input method, so composing (Japanese, dead keys,
+        // press-and-hold accents, the emoji picker) works; keys that are not
+        // text go straight to the table. The rule is `NymbraInput`'s.
+        if Keyboard.routesThroughInputMethod(keyCode: event.keyCode,
+                                             modifiers: Self.modifiers(from: flags),
+                                             isComposing: hasMarkedText()) {
+            pendingKeyEvent = event
+            defer { pendingKeyEvent = nil }
+            interpretKeyEvents([event])
+            return
+        }
+        sendKey(event)
+    }
+
+    /// The key table: an event in, xterm's bytes out.
+    private func sendKey(_ event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // The mapping itself lives in NymbraInput, where it is asserted without
         // a window. This method is only the AppKit boundary.
         let bytes = Keyboard.bytes(
@@ -653,6 +692,21 @@ final class TermView: NSView {
         seenAppendedCount = appended
         scrollOffset = Screen.pinnedScrollOffset(scrollOffset, linesAppended: moved,
                                                  historyCount: screen.scrollback.count)
+        // Mid-frame (DEC 2026): hold the last complete picture. A program that
+        // never ends its frame is not allowed to freeze the view — after a short
+        // wait the screen is drawn as it stands, which is what xterm and kitty do.
+        if screen.synchronizedOutput {
+            if syncTimeout == nil {
+                syncTimeout = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { [weak self] _ in
+                    self?.syncTimeout = nil
+                    self?.needsDisplay = true
+                }
+            }
+            updateScroller()
+            return
+        }
+        syncTimeout?.invalidate()
+        syncTimeout = nil
         needsDisplay = true
         updateScroller()
     }
@@ -1103,9 +1157,105 @@ final class TermView: NSView {
     }
 
     override func doCommand(by selector: Selector) {
+        // The input method passed on a key it had no text for. Send it as the
+        // key it was, rather than beeping: the key table knows what it means.
+        if let event = pendingKeyEvent {
+            sendKey(event)
+            return
+        }
         // Swallow the system beep for keys we do not handle.
         if selector == #selector(NSResponder.insertNewline(_:)) { return }
         super.doCommand(by: selector)
+    }
+}
+
+// MARK: - Input methods
+
+extension TermView: NSTextInputClient {
+
+    /// Committed text: send it to the program.
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        let hadMarked = !markedText.isEmpty
+        markedText = ""
+        markedSelection = NSRange(location: 0, length: 0)
+        if hadMarked { needsDisplay = true }
+        guard !text.isEmpty else { return }
+        // A plain key that the input method handed straight back is sent through
+        // the key table, so its encoding is exactly what it was before input
+        // methods were involved. Composed text is sent as the text it is.
+        if !hadMarked, let event = pendingKeyEvent, event.characters == text {
+            sendKey(event)
+            return
+        }
+        onInput?(Array(text.utf8))
+    }
+
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        markedText = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        markedSelection = selectedRange
+        needsDisplay = true
+    }
+
+    func unmarkText() {
+        guard !markedText.isEmpty else { return }
+        markedText = ""
+        needsDisplay = true
+    }
+
+    func hasMarkedText() -> Bool { !markedText.isEmpty }
+
+    func markedRange() -> NSRange {
+        markedText.isEmpty
+            ? NSRange(location: NSNotFound, length: 0)
+            : NSRange(location: 0, length: (markedText as NSString).length)
+    }
+
+    func selectedRange() -> NSRange {
+        markedText.isEmpty ? NSRange(location: 0, length: 0) : markedSelection
+    }
+
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
+
+    func attributedSubstring(forProposedRange range: NSRange,
+                             actualRange: NSRangePointer?) -> NSAttributedString? { nil }
+
+    func characterIndex(for point: NSPoint) -> Int { NSNotFound }
+
+    /// Where the cursor is on screen, so the candidate window and the accent
+    /// picker open beside the text rather than in a corner of the display.
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        let cursor = screen.cursor
+        let origin = cellOrigin(col: cursor.col, row: cursor.row)
+        let rect = NSRect(x: origin.x, y: origin.y, width: cellWidth, height: cellHeight)
+        guard let window else { return rect }
+        return window.convertToScreen(convert(rect, to: nil))
+    }
+
+    /// The composition, drawn over the cursor's cell onward: on the terminal's
+    /// own background, in its own ink, underlined the way the system marks
+    /// unfinished text.
+    fileprivate func drawMarkedText(_ ctx: CGContext) {
+        let cursor = screen.cursor
+        let origin = cellOrigin(col: cursor.col, row: cursor.row)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(
+            string: markedText,
+            attributes: [
+                .init(kCTFontAttributeName as String): font,
+                .init(kCTForegroundColorAttributeName as String): theme.foreground,
+            ]
+        ))
+        let width = max(cellWidth, ceil(CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))))
+        ctx.setFillColor(theme.background)
+        ctx.fill(CGRect(x: origin.x, y: origin.y, width: width, height: cellHeight))
+        ctx.textPosition = CGPoint(x: origin.x, y: baseline(row: cursor.row))
+        CTLineDraw(line, ctx)
+        ctx.setFillColor(theme.foreground)
+        ctx.fill(CGRect(x: origin.x, y: origin.y + 1, width: width, height: 1))
+        // A thin bar where the input method's insertion point is.
+        let caret = CTLineGetOffsetForStringIndex(line, markedSelection.location, nil)
+        ctx.setFillColor(theme.cursor)
+        ctx.fill(CGRect(x: origin.x + caret, y: origin.y, width: 2, height: cellHeight))
     }
 }
 

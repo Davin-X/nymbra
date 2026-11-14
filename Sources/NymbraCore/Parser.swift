@@ -335,6 +335,11 @@ public final class Parser {
             screen.reset()
             return
         }
+        if intermediates == [0x24], final == 0x70, isPrivate {   // CSI ? Ps $ p  DECRQM
+            let mode = value(0, 0)
+            respond(Array("\u{1B}[?\(mode);\(screen.privateModeState(mode))$y".utf8))
+            return
+        }
         if intermediates == [0x20], final == 0x71 {     // CSI SP q DECSCUSR
             if let style = Screen.CursorStyle(decscusr: value(0, 0)) { screen.setCursorStyle(style) }
             return

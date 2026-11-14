@@ -399,3 +399,82 @@ func runFindTest(configuration: Configuration) -> Bool { // swiftlint:disable:th
     print("find-test\t" + state + " " + optionFlags + " " + drawn)
     return ok
 }
+
+/// Typing that is not one key, one letter: an input method composing text,
+/// and a program drawing a frame all at once.
+///
+/// The input method itself is the system's, and a headless process cannot
+/// drive Kotoeri. What is proved is the terminal's side of the contract: text
+/// being composed is drawn and never sent; committed text is sent once, as
+/// UTF-8; real key events still reach the program with their exact bytes; and
+/// the candidate window would open at the cursor rather than in a corner.
+func runInputTest(configuration: Configuration) -> Bool { // swiftlint:disable:this function_body_length
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+
+    var quiet = configuration
+    quiet.behaviour.cursorBlinks = false
+    quiet.behaviour.confirmBeforeClosingRunningSession = false
+    let controller = AppController(configuration: quiet)
+    guard let window = controller.makeWindow(), let view = window.focusedView else {
+        print("input-test\tFAIL: no window")
+        return false
+    }
+    window.window.makeKeyAndOrderFront(nil)
+    window.window.makeFirstResponder(view)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+
+    // Capture what would be sent, instead of sending it to the shell.
+    let original = view.onInput
+    var sent: [UInt8] = []
+    view.onInput = { sent += $0 }
+    defer { view.onInput = original }
+
+    // Composing: drawn, not sent.
+    let before = pixels(of: view)
+    view.setMarkedText("にほ", selectedRange: NSRange(location: 2, length: 0),
+                       replacementRange: NSRange(location: NSNotFound, length: 0))
+    let composing = view.hasMarkedText() && view.markedRange().length == 2 && sent.isEmpty
+    let drawn = differingBytes(before, pixels(of: view)) > 200
+
+    // The candidate window opens at the cursor, on this window's screen.
+    let rect = view.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)
+    let atCursor = rect.width > 0 && rect.height > 0 && window.window.frame.contains(rect.origin)
+
+    // Committing: sent once, as UTF-8, and the composition is gone.
+    view.insertText("日本", replacementRange: NSRange(location: NSNotFound, length: 0))
+    let committed = sent == Array("日本".utf8) && !view.hasMarkedText()
+    let cleared = differingBytes(before, pixels(of: view)) == 0
+
+    // Real key events: a letter makes the round trip through the input method
+    // and comes back as itself; ⌃C and an arrow go straight to the key table.
+    sent.removeAll()
+    view.keyDown(with: keyEvent(0, "a", windowNumber: window.window.windowNumber))
+    let letter = sent == [0x61]
+    sent.removeAll()
+    view.keyDown(with: keyEvent(8, "\u{03}", modifiers: .control, windowNumber: window.window.windowNumber))
+    let control = sent == [0x03]
+    sent.removeAll()
+    view.keyDown(with: keyEvent(126, "\u{F700}", windowNumber: window.window.windowNumber))
+    let arrow = sent == Array("\u{1B}[A".utf8)
+    sent.removeAll()
+    view.keyDown(with: keyEvent(36, "\r", windowNumber: window.window.windowNumber))
+    let enter = sent == [0x0D]
+
+    // A frame (DEC 2026): held while open, drawn when closed.
+    let shell = window.panes[window.focusedPane]!.terminal
+    shell.parser.feed("\u{1B}[?2026hframe")
+    view.screenDidUpdate()
+    let held = view.isHoldingFrame
+    shell.parser.feed("\u{1B}[?2026l")
+    view.screenDidUpdate()
+    let released = !view.isHoldingFrame
+
+    let ok = composing && drawn && atCursor && committed && cleared && letter && control
+        && arrow && enter && held && released
+    print("input-test\tcomposing=\(flag(composing)) drawn=\(flag(drawn)) atCursor=\(flag(atCursor)) "
+          + "committed=\(flag(committed)) cleared=\(flag(cleared)) letter=\(flag(letter)) "
+          + "control=\(flag(control)) arrow=\(flag(arrow)) enter=\(flag(enter)) "
+          + "held=\(flag(held)) released=\(flag(released))")
+    return ok
+}
