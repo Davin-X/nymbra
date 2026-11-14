@@ -81,23 +81,26 @@ final class TabChipView: NSView {
         iconField.setContentHuggingPriority(.required, for: .horizontal)
         addSubview(iconField)
 
-        titleField.font = .systemFont(ofSize: 13)
+        titleField.font = .systemFont(ofSize: 12, weight: .medium)
         titleField.textColor = .secondaryLabelColor
         titleField.lineBreakMode = .byTruncatingTail
         titleField.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleField)
 
         unreadDot.wantsLayer = true
-        unreadDot.layer?.backgroundColor = NSColor.systemYellow.cgColor
-        unreadDot.layer?.cornerRadius = 3
+        unreadDot.layer?.cornerRadius = 3.5
+        unreadDot.layer?.shadowOpacity = 0.6
+        unreadDot.layer?.shadowRadius = 3
+        unreadDot.layer?.shadowOffset = .zero
         unreadDot.isHidden = true
         unreadDot.translatesAutoresizingMaskIntoConstraints = false
         addSubview(unreadDot)
 
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close tab")?
-            .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+            .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
         closeButton.imagePosition = .imageOnly
         closeButton.isBordered = false
+        closeButton.bezelStyle = .inline
         closeButton.contentTintColor = .secondaryLabelColor
         closeButton.refusesFirstResponder = true
         closeButton.target = self
@@ -122,6 +125,21 @@ final class TabChipView: NSView {
             closeButton.widthAnchor.constraint(equalToConstant: 18),
             closeButton.heightAnchor.constraint(equalToConstant: 18),
         ])
+        applyLayerColors()
+    }
+
+    /// Layer colours are `CGColor`s, which are resolved once and do not follow the
+    /// system between light and dark. Resolve them again whenever it changes.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyLayerColors()
+    }
+
+    private func applyLayerColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            unreadDot.layer?.backgroundColor = NSColor.systemYellow.cgColor
+            unreadDot.layer?.shadowColor = NSColor.systemYellow.withAlphaComponent(0.4).cgColor
+        }
     }
 
     @available(*, unavailable)
@@ -177,14 +195,17 @@ final class TabChipView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let selected = isSelected
         guard selected || hovered else { return }
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 2), xRadius: 5, yRadius: 5)
-        let fill = NSColor.controlBackgroundColor
-        (selected ? fill : fill.withAlphaComponent(0.4)).setFill()
-        path.fill()
+        let rect = bounds.insetBy(dx: 2, dy: 1)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
         if selected {
-            NSColor.separatorColor.setStroke()
+            NSColor.selectedContentBackgroundColor.withAlphaComponent(0.22).setFill()
+            path.fill()
+            NSColor.selectedContentBackgroundColor.withAlphaComponent(0.55).setStroke()
             path.lineWidth = 1
             path.stroke()
+        } else {
+            NSColor.labelColor.withAlphaComponent(0.08).setFill()
+            path.fill()
         }
     }
 }
@@ -237,13 +258,15 @@ final class TabBarView: NSVisualEffectView {
     static let chipMaximumWidth: CGFloat = 220
     private static let chipGap: CGFloat = 4
     private static let leadingInset: CGFloat = 8
-    private static let plusWidth: CGFloat = 30
+    private static let plusWidth: CGFloat = 34
     private static let scrollViewHeight: CGFloat = 28  // height of the scrollable chip area
 
     private(set) var tabs: [Tab] = []
     /// The item in the strip that is not a tab. It is a button and never a
     /// selection: pressing it makes a tab instead of showing one.
     let plusButton = NSButton()
+    /// Shows when something finished out of sight and may need attention.
+    let attentionButton = NSButton()
 
     // Scroll view for horizontal scrolling of chips
     private let scrollView = NSScrollView()
@@ -255,20 +278,31 @@ final class TabBarView: NSVisualEffectView {
 
     private(set) var selectedID: TabID?
 
+    /// The right-hand cluster: `[attention?] [counter] [+]`, laid out in `layout()`.
+    private static let trailingInset: CGFloat = 8
+    private static let clusterGap: CGFloat = 6
+    private static let attentionWidth: CGFloat = 28
+
+    /// The `+` tooltip names the shortcut in force, which the person can change.
+    var newTabShortcut: String? {
+        didSet { plusButton.toolTip = newTabShortcut.map { "New Tab (\($0))" } ?? "New Tab" }
+    }
+
     var onSelect: ((TabID) -> Void)?
     var onClose: ((TabID) -> Void)?
     var onAdd: (() -> Void)?
     var onReorder: ((TabID, Int) -> Void)?
     var onMenu: ((TabID, NSPoint) -> Void)?
+    var onAttention: (() -> Void)?
 
     init() {
         super.init(frame: .zero)
-        material = .titlebar
+        material = .headerView
         blendingMode = .withinWindow
         state = .followsWindowActiveState
         wantsLayer = true
-        // Don't clip the whole view — we clip via the scroll view
         layer?.masksToBounds = false
+        layer?.borderWidth = 0.5
         setAccessibilityLabel("Tabs")
 
         // Configure scroll view for horizontal scrolling
@@ -286,29 +320,49 @@ final class TabBarView: NSVisualEffectView {
         chipContainer.translatesAutoresizingMaskIntoConstraints = false
         chipContainer.wantsLayer = true
 
-        // Plus button fixed at the right edge
-        plusButton.translatesAutoresizingMaskIntoConstraints = false
-        plusButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New tab")?
-            .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
 
         // Tab counter: fixed, so it is not scrolled away with the chips.
-        tabCounterLabel.font = .systemFont(ofSize: 10, weight: .medium)
+        tabCounterLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         tabCounterLabel.textColor = .secondaryLabelColor
         tabCounterLabel.alignment = .center
         tabCounterLabel.translatesAutoresizingMaskIntoConstraints = false
+        tabCounterLabel.wantsLayer = true
+        tabCounterLabel.layer?.cornerRadius = 8
         addSubview(tabCounterLabel)
+
+        // The `+` is placed by frame in `layout()`, not by constraints: NSButton's
+        // intrinsic size for the symbol (31.5pt) conflicts with the 28pt strip.
+        plusButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New tab")?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .semibold))
         plusButton.imagePosition = .imageOnly
         plusButton.isBordered = false
-        plusButton.contentTintColor = .secondaryLabelColor
+        plusButton.bezelStyle = .regularSquare
+        plusButton.contentTintColor = .labelColor
         plusButton.refusesFirstResponder = true
         plusButton.target = self
         plusButton.action = #selector(addPressed(_:))
-        plusButton.toolTip = "New tab"
+        plusButton.toolTip = "New Tab"
+        plusButton.wantsLayer = true
+        plusButton.layer?.cornerRadius = 7
         addSubview(plusButton)
 
-        // Layout constraints
+        attentionButton.image = NSImage(systemSymbolName: "exclamationmark.circle.fill",
+                                        accessibilityDescription: "Needs attention")?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
+        attentionButton.imagePosition = .imageOnly
+        attentionButton.isBordered = false
+        attentionButton.contentTintColor = .systemOrange
+        attentionButton.refusesFirstResponder = true
+        attentionButton.target = self
+        attentionButton.action = #selector(attentionPressed(_:))
+        attentionButton.toolTip = "Needs attention"
+        attentionButton.isHidden = true
+        addSubview(attentionButton)
+
+        // The trailing constant is recomputed in `layout()`, where the width of
+        // the right-hand cluster is known.
         scrollViewTrailingConstraint = scrollView.trailingAnchor.constraint(
-            equalTo: trailingAnchor, constant: -(TabBarView.plusWidth + 52))
+            equalTo: trailingAnchor, constant: 0)
         NSLayoutConstraint.activate([
             // Scroll view fills the strip vertically, takes the width minus the
             // plus button and the tab counter.
@@ -321,16 +375,23 @@ final class TabBarView: NSVisualEffectView {
             chipContainer.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
             chipContainer.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
             chipContainer.heightAnchor.constraint(equalToConstant: TabBarView.scrollViewHeight),
-
-            // Plus button fixed at right edge
-            plusButton.widthAnchor.constraint(equalToConstant: TabBarView.plusWidth),
-            plusButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            plusButton.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+        applyLayerColors()
+    }
 
-        // Trackpad/mouse wheel scrolling - on macOS the scroll view handles this natively
-        // The NSScrollView with autohidesScrollers and horizontalScroller handles trackpad
-        // scrolling automatically. No gesture recognizer needed.
+    /// See `TabChipView.viewDidChangeEffectiveAppearance`: layer colours have to
+    /// be resolved again when the system switches between light and dark.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyLayerColors()
+    }
+
+    private func applyLayerColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.6).cgColor
+            tabCounterLabel.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+            plusButton.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+        }
     }
 
     @available(*, unavailable)
@@ -411,8 +472,22 @@ final class TabBarView: NSVisualEffectView {
 
     func pressClose(of id: TabID) { tab(id)?.chip.pressClose() }
 
+    func setAttention(count: Int) {
+        let show = count > 0
+        let label = count == 1 ? "1 item needs attention" : "\(count) items need attention"
+        guard attentionButton.isHidden == show || attentionButton.toolTip != label else { return }
+        attentionButton.isHidden = !show
+        attentionButton.toolTip = label
+        attentionButton.setAccessibilityLabel(label)
+        needsLayout = true
+    }
+
     @objc private func addPressed(_ sender: NSButton) {
         onAdd?()
+    }
+
+    @objc private func attentionPressed(_ sender: NSButton) {
+        onAttention?()
     }
 
     // MARK: - Where everything is
@@ -443,9 +518,13 @@ final class TabBarView: NSVisualEffectView {
     }
 
     override func layout() {
-        // Leave room for the counter between the scroll view and the plus button.
-        let counterWidth = max(tabCounterLabel.intrinsicContentSize.width + 10, 44)
-        scrollViewTrailingConstraint.constant = -(TabBarView.plusWidth + counterWidth + 12)
+        // Leave room for the counter, optional attention indicator, and plus button.
+        let counterWidth = max(tabCounterLabel.intrinsicContentSize.width + 14, 46)
+        let trailingInset = TabBarView.trailingInset
+        let gap = TabBarView.clusterGap
+        let attentionW: CGFloat = attentionButton.isHidden ? 0 : TabBarView.attentionWidth
+        let attentionGap: CGFloat = attentionButton.isHidden ? 0 : gap
+        scrollViewTrailingConstraint.constant = -(trailingInset + TabBarView.plusWidth + gap + counterWidth + attentionGap + attentionW + gap)
 
         super.layout()
         let y: CGFloat = 1
@@ -464,21 +543,19 @@ final class TabBarView: NSVisualEffectView {
         // Update chip container width to match content
         chipContainer.frame.size.width = max(x, chipContainer.bounds.width)
 
-        // Position the plus button directly — its frame is set here rather than
-        // via a height constraint because NSButton's intrinsic content size for
-        // the "plus" symbol (31.5pt) conflicts with the 28pt strip height.
-        plusButton.frame = NSRect(x: bounds.width - TabBarView.plusWidth - 6,
+        // Right cluster: [attention?] [counter] [+]
+        plusButton.frame = NSRect(x: bounds.width - trailingInset - TabBarView.plusWidth,
                                   y: 1,
                                   width: TabBarView.plusWidth,
                                   height: TabBarView.scrollViewHeight)
 
-        // Position the tab counter just to the left of the plus button.
-        let counterX = plusButton.frame.minX - counterWidth - 4
+        let counterX = plusButton.frame.minX - gap - counterWidth
         tabCounterLabel.frame = NSRect(x: counterX, y: 1,
                                       width: counterWidth, height: TabBarView.scrollViewHeight)
-    }
 
-// MARK: - Scrolling
-    // Trackpad and mouse wheel scrolling are handled natively by NSScrollView.
-    // The horizontal scroller appears automatically when chips overflow.
+        if !attentionButton.isHidden {
+            attentionButton.frame = NSRect(x: counterX - gap - attentionW, y: 1,
+                                           width: attentionW, height: TabBarView.scrollViewHeight)
+        }
+    }
 }

@@ -117,4 +117,77 @@ func attentionSuite(_ h: Harness) {
     h.equal(timer.note(.commandFinished(nil), now: t0.addingTimeInterval(31)),
             CommandTimer.Finished(status: nil, seconds: 1),
             "and is measured from the second, not across the abandoned gap")
+
+    // MARK: The "needs attention" inbox — a short list, not a firehose
+
+    let t1 = Date(timeIntervalSince1970: 2_000_000)
+    func item(_ target: String, title: String = "tab", body: String = "done",
+              failure: Bool = false, at t: Date = t1) -> AttentionItem {
+        AttentionItem(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                      targetKey: target, title: title, body: body,
+                      isFailure: failure, timestamp: t)
+    }
+
+    var inbox = AttentionInbox(limit: 3)
+    h.expect(inbox.isEmpty, "nothing needs attention until something does")
+    inbox.add(item("tab-1", title: "api", body: "Finished in 12.0s."))
+    h.equal(inbox.count, 1, "one item recorded")
+    h.equal(inbox.items.first?.targetKey, "tab-1", "the item keeps its target")
+
+    let later = t1.addingTimeInterval(5)
+    inbox.add(AttentionItem(id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+                            targetKey: "tab-1", title: "api", body: "Exited 1 after 12.0s.",
+                            isFailure: true, timestamp: later))
+    h.equal(inbox.count, 1, "the same target is replaced, not duplicated")
+    h.equal(inbox.items.first?.isFailure, true, "replaced with the latest state")
+    h.equal(inbox.items.first?.body, "Exited 1 after 12.0s.", "latest body kept")
+
+    inbox.add(AttentionItem(id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+                            targetKey: "tab-2", title: "worker", body: "Finished in 42.0s.",
+                            isFailure: false, timestamp: later))
+    h.equal(inbox.items.first?.targetKey, "tab-2", "most recent item is first")
+
+    inbox.add(AttentionItem(id: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+                            targetKey: "tab-3", title: "db", body: "Finished in 8.0s.",
+                            isFailure: false, timestamp: later))
+    inbox.add(AttentionItem(id: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
+                            targetKey: "tab-4", title: "web", body: "Finished in 9.0s.",
+                            isFailure: false, timestamp: later))
+    h.equal(inbox.count, 3, "the list is capped — a firehose is not attention")
+    h.expect(inbox.items.contains { $0.targetKey == "tab-1" } == false,
+             "the oldest item falls off when the limit is reached")
+
+    inbox.remove(targetKey: "tab-3")
+    h.equal(inbox.count, 2, "looking at a tab clears its attention item")
+    inbox.clear()
+    h.expect(inbox.isEmpty, "clearing removes everything")
+
+    // MARK: What reaches the inbox is exactly what is announced
+
+    func entry(status: Int32?, seconds: Double = 30, watched: Bool = false) -> AttentionItem? {
+        CommandAttention.announcement(status: status, seconds: seconds, threshold: 10,
+                                      isWatched: watched, subject: "build")
+            .map { AttentionItem($0, targetKey: "7", timestamp: t1) }
+    }
+    h.equal(entry(status: 2)?.isFailure, true, "a long command that exited non-zero is a failure")
+    h.equal(entry(status: 2)?.body, "Exited 2 after 30.0s.", "and says how it ended")
+    h.equal(entry(status: 0)?.isFailure, false, "one that succeeded is not")
+    h.equal(entry(status: nil)?.isFailure, false,
+            "nor is one that reported no status: nothing says it went badly")
+    h.expect(entry(status: 1, watched: true) == nil,
+             "a command the person watched never reaches the inbox")
+    h.expect(entry(status: 1, seconds: 2) == nil,
+             "nor does a quick one — the inbox is no noisier than the notifications")
+    h.equal(entry(status: 0)?.targetKey, "7", "the entry knows which tab it is about")
+    h.equal(entry(status: 0)?.title, "build", "and is called what the tab is called")
+
+    // MARK: How long ago, at a glance
+
+    let stamped = item("t", at: t1)
+    h.equal(stamped.age(now: t1.addingTimeInterval(20)), "just now", "under a minute is just now")
+    h.equal(stamped.age(now: t1.addingTimeInterval(4 * 60 + 59)), "4m ago", "minutes round down")
+    h.equal(stamped.age(now: t1.addingTimeInterval(2 * 3_600 + 5)), "2h ago", "then hours")
+    h.equal(stamped.age(now: t1.addingTimeInterval(3 * 86_400)), "3d ago", "then days")
+    h.equal(stamped.age(now: t1.addingTimeInterval(-30)), "just now",
+            "a clock that moved backwards is not a negative age")
 }

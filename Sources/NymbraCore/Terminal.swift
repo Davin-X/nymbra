@@ -5,9 +5,15 @@ import Foundation
 /// those bytes describe.
 ///
 /// Threading (docs/ARCHITECTURE.md): one reader thread blocks on the PTY master.
-/// Every chunk is handed to `deliveryQueue` — the main queue in the application —
+/// Its chunks are handed to `deliveryQueue` — the main queue in the application —
 /// where the parser mutates the screen and `onUpdate` fires. The screen is
 /// therefore only ever touched on one thread, which is why it needs no locking.
+///
+/// Chunks are coalesced: while one delivery is waiting for its turn on the
+/// queue, further chunks join it rather than queueing deliveries of their own.
+/// Under a flood (`cat` of a large file) that turns hundreds of parse-and-notify
+/// rounds into one per turn of the main queue, so `onUpdate` — and everything
+/// the window hangs off it — runs once for all of them.
 public final class Terminal {
     public let screen: Screen
     public let parser: Parser
@@ -27,6 +33,12 @@ public final class Terminal {
     private let ioQueue: DispatchQueue
     private let deliveryQueue: DispatchQueue
     private var started = false
+
+    /// Bytes read but not yet parsed, and whether a delivery is already queued
+    /// to parse them. Shared between the reader thread and `deliveryQueue`.
+    private let pendingLock = NSLock()
+    private var pending: [UInt8] = []
+    private var deliveryScheduled = false
 
     /// Spawn `shell` — or the user's login shell — in a `size` grid.
     ///
@@ -69,11 +81,13 @@ public final class Terminal {
         while true {
             let count = ptyRead(master, into: &chunk)
             if count <= 0 { break }
-            let bytes = Array(chunk[0..<count])
-            deliveryQueue.async { [weak self] in
-                guard let self else { return }
-                self.parser.feed(bytes)
-                self.onUpdate?()
+            pendingLock.lock()
+            pending.append(contentsOf: chunk[0..<count])
+            let schedule = !deliveryScheduled
+            deliveryScheduled = true
+            pendingLock.unlock()
+            if schedule {
+                deliveryQueue.async { [weak self] in self?.deliverPending() }
             }
         }
         deliveryQueue.async { [weak self] in
@@ -81,6 +95,21 @@ public final class Terminal {
             self.isRunning = false
             self.onExit?()
         }
+    }
+
+    /// Parse everything read since the last delivery, then say so once.
+    ///
+    /// The exit notification is queued after the reader's last delivery, so on
+    /// a serial queue every byte is parsed before `onExit` runs.
+    private func deliverPending() {
+        pendingLock.lock()
+        let bytes = pending
+        pending.removeAll(keepingCapacity: true)
+        deliveryScheduled = false
+        pendingLock.unlock()
+        guard !bytes.isEmpty else { return }
+        parser.feed(bytes)
+        onUpdate?()
     }
 
     /// True until the shell exits or the PTY reaches end of file.

@@ -50,7 +50,7 @@ and only the part that needs a screen lives in the app.
 | Font resolution and metrics | `Nymbra/Fonts.swift` | CoreText, and shared by the grid and the preview so they cannot disagree |
 | Grid drawing, selection highlight, clipboard | `Nymbra/TermView.swift` | The renderer |
 | The tab strip: chips, their order, the `+` | `Nymbra/TabBarView.swift` | Where a tab sits and what a click on it does is layout and hit-testing, which is AppKit's half; what a tab *is* — shells, panes, attention — stays in the window and the core |
-| Windows, settings UI, menu bar, notification clicks | `Nymbra/AppController.swift`, `TerminalWindow.swift`, `SettingsWindow.swift`, `AppMenu.swift`, `Notifications.swift` | AppKit, and deliberately thin |
+| Windows, settings UI, menu bar, notification clicks | `Nymbra/AppController.swift`, `TerminalWindow.swift`, `SettingsWindow*.swift`, `AppMenu.swift`, `Notifications.swift` | AppKit, and deliberately thin |
 | Claiming a shell's terminal | `NymbraSpawn/main.c`, `NymbraCore/PTY.swift` | It is `ioctl` and `exec`: the one thing `posix_spawn` cannot express, so it is its own program (ADR-0008) |
 
 ### The dependency rule

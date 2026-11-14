@@ -50,6 +50,27 @@ final class TermView: NSView {
     /// so a slow scroll is not rounded away to nothing.
     private var scrollRemainder: CGFloat = 0
 
+    /// How much of the scrollback had been appended when the view last looked.
+    /// The difference is how far history moved under a viewport scrolled up
+    /// into it, which is what keeps that viewport still while output arrives.
+    private var seenAppendedCount = 0
+
+    /// The vertical scrollbar that sits on the right edge of the pane.
+    ///
+    /// Overlay style: it floats over the terminal and takes no grid space, so
+    /// showing it never resizes the shell. A bare `NSScroller` does not fade the
+    /// way one inside a scroll view does, so the view decides: it shows while the
+    /// viewport is up in history, flashes briefly after a scroll back to the live
+    /// screen, and is otherwise hidden — so it neither covers the last column nor
+    /// catches clicks meant for a selection.
+    private let scroller: TerminalScroller = {
+        let s = TerminalScroller()
+        s.scrollerStyle = .overlay
+        s.knobStyle = .default
+        s.isHidden = true
+        return s
+    }()
+
     /// Cursor blink phase, and the timer that advances it.
     private var blinkOn = true
     private var blinkTimer: Timer?
@@ -98,6 +119,13 @@ final class TermView: NSView {
 
         super.init(frame: frame)
         screen.scrollbackLimit = configuration.behaviour.scrollbackLines
+        seenAppendedCount = screen.scrollback.appendedCount
+
+        scroller.target = self
+        scroller.action = #selector(scrollerDidChange(_:))
+        addSubview(scroller)
+        scroller.frame = scrollerFrame()
+        updateScroller()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -107,11 +135,23 @@ final class TermView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         updateGridSize()
+        scroller.frame = scrollerFrame()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         updateBlinkTimer()
+    }
+
+    override func layout() {
+        super.layout()
+        scroller.frame = scrollerFrame()
+    }
+
+    /// The scroller's frame, pinned to the right edge of the view.
+    private func scrollerFrame() -> NSRect {
+        let width = NSScroller.scrollerWidth(for: .regular, scrollerStyle: scroller.scrollerStyle)
+        return NSRect(x: bounds.width - width, y: 0, width: width, height: bounds.height)
     }
 
     /// Apply new settings. Live: the metrics are re-measured and the grid
@@ -133,6 +173,7 @@ final class TermView: NSView {
         updateGridSize()
         updateBlinkTimer()
         needsDisplay = true
+        updateScroller()
     }
 
     private func updateGridSize() {
@@ -160,6 +201,7 @@ final class TermView: NSView {
         scrollRemainder = 0
         onResize?(size)
         needsDisplay = true
+        updateScroller()
     }
 
     // MARK: - Metrics
@@ -562,7 +604,10 @@ final class TermView: NSView {
             sendMouseReport(for: event)
             return
         }
-        guard !screen.scrollback.isEmpty else { return }
+        // The alternate screen has no history of its own: a full-screen program
+        // owns the whole view, and showing the shell's scrollback above it would
+        // mix two unrelated screens.
+        guard !screen.scrollback.isEmpty, !screen.altScreenActive else { return }
         if event.hasPreciseScrollingDeltas {
             scrollRemainder += event.scrollingDeltaY
             let lines = (scrollRemainder / cellHeight).rounded(.towardZero)
@@ -581,6 +626,7 @@ final class TermView: NSView {
         guard updated != scrollOffset else { return }
         scrollOffset = updated
         needsDisplay = true
+        flashScroller()
     }
 
     private func returnToLiveScreen() {
@@ -588,6 +634,85 @@ final class TermView: NSView {
         scrollOffset = 0
         scrollRemainder = 0
         needsDisplay = true
+        updateScroller()
+    }
+
+    /// The screen changed underneath the view: redraw, and keep a viewport that
+    /// is up in history looking at the same lines.
+    ///
+    /// `scrollOffset` counts up from the live screen, so without this every line
+    /// of new output would slide the history being read up by one. The shift is
+    /// the number of lines appended since the last look — whether the history
+    /// grew or, once full, dropped its oldest line to make room, the line being
+    /// read moved by exactly that much.
+    func screenDidUpdate() {
+        let appended = screen.scrollback.appendedCount
+        let moved = appended &- seenAppendedCount
+        seenAppendedCount = appended
+        scrollOffset = Screen.pinnedScrollOffset(scrollOffset, linesAppended: moved,
+                                                 historyCount: screen.scrollback.count)
+        needsDisplay = true
+        updateScroller()
+    }
+
+    // MARK: - Scroller
+
+    /// Whether the scroller is in its short after-scroll flash.
+    private var scrollerFlashing = false
+    private var scrollerFlashTimer: Timer?
+
+    /// Show the scroller for a moment, the way a system scroll view does after
+    /// a scroll, so a person scrolling back to the bottom sees where they landed.
+    private func flashScroller() {
+        scrollerFlashing = true
+        scrollerFlashTimer?.invalidate()
+        scrollerFlashTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+            self?.scrollerFlashing = false
+            self?.updateScroller()
+        }
+        updateScroller()
+    }
+
+    /// Whether the scrollbar should be on screen at all. See `scroller`.
+    var scrollerIsVisible: Bool { !scroller.isHidden }
+
+    /// The viewport's distance up into history, for the window tests.
+    var currentScrollOffset: Int { scrollOffset }
+
+    /// Refresh the scrollbar to match the current scrollback and viewport.
+    /// Call whenever scrollOffset, rows, or scrollback changes.
+    private func updateScroller() {
+        let scrollbackCount = screen.scrollback.count
+        let visible = scrollbackCount > 0
+            && !screen.altScreenActive
+            && (scrollOffset > 0 || scrollerFlashing)
+        if scroller.isHidden == visible { scroller.isHidden = !visible }
+        guard visible else { return }
+        let total = Double(scrollbackCount + rows)
+        scroller.knobProportion = total > 0 ? Double(rows) / total : 1.0
+        // floatValue is a 0–1 fraction: 0 = oldest scrollback (top), 1 = live screen (bottom).
+        scroller.floatValue = Float(1.0 - Double(scrollOffset) / Double(scrollbackCount))
+    }
+
+    @objc private func scrollerDidChange(_ sender: NSScroller) {
+        let scrollbackCount = screen.scrollback.count
+        guard scrollbackCount > 0 else { return }
+        // A page is a screenful less one line, so the line at the edge stays in
+        // view as context — what `less` and every scroll view do.
+        let page = max(1, rows - 1)
+        switch sender.hitPart {
+        case .decrementPage:
+            scroll(by: page)
+        case .incrementPage:
+            scroll(by: -page)
+        case .knob, .knobSlot:
+            let fraction = Double(sender.floatValue)
+            let newOffset = Int(((1.0 - fraction) * Double(scrollbackCount)).rounded())
+            scroll(by: min(max(0, newOffset), scrollbackCount) - scrollOffset)
+            scrollRemainder = 0
+        default:
+            break
+        }
     }
 
     /// Cmd+V. Wrapped in the bracketed-paste guards when the program asked for
@@ -962,16 +1087,30 @@ final class TermView: NSView {
     }
 
     private func scrollToMatch(_ match: FindMatch) {
-        let targetRow = match.row
-        // Scroll so the match is in the middle of the viewport if possible.
-        let offset = max(0, targetRow - screen.rows / 2)
-        scrollOffset = max(0, min(offset, screen.scrollback.count))
+        let history = screen.scrollback.count
+        // `match.row` is absolute (history first), and `scrollOffset` counts up
+        // from the live screen, so convert: put the match in the middle of the
+        // viewport where there is room, then clamp to what exists.
+        let firstRow = match.row - rows / 2
+        let offset = max(0, min(history - firstRow, history))
+        guard offset != scrollOffset else { return }
+        scrollOffset = offset
+        scrollRemainder = 0
         needsDisplay = true
+        flashScroller()
     }
 
     override func doCommand(by selector: Selector) {
         // Swallow the system beep for keys we do not handle.
         if selector == #selector(NSResponder.insertNewline(_:)) { return }
         super.doCommand(by: selector)
+    }
+}
+
+/// The pane's scrollbar. A wheel over it scrolls the terminal, which owns the
+/// viewport, rather than the scroller on its own.
+private final class TerminalScroller: NSScroller {
+    override func scrollWheel(with event: NSEvent) {
+        superview?.scrollWheel(with: event)
     }
 }

@@ -253,7 +253,7 @@ func paneLayoutSuite(_ h: Harness) {
 
     // A window too small for even one minimum: the panes share what there is
     // rather than one of them going negative.
-    var tiny = two
+    let tiny = two
     tilesExactly(tiny, in: (width: 60, height: 40), "a window smaller than two panes")
 
     // MARK: - Hit testing
@@ -268,7 +268,7 @@ func paneLayoutSuite(_ h: Harness) {
     // Panes have independent shells, so the layouts that describe them must not
     // share state either: changing a copy must not touch the original.
 
-    var original = two
+    let original = two
     var copy = original
     copy.close(b)
     h.equal(original.panes, [a, b], "editing a copy of a layout leaves the original alone")

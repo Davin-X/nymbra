@@ -147,7 +147,7 @@ public final class Screen {
     public var title = ""
 
     public private(set) var altScreenActive = false
-    public private(set) var scrollback: [[Cell]] = []
+    public private(set) var scrollback = Scrollback()
     /// Whether each row was broken by the terminal itself (a soft wrap) rather
     /// than by a line feed. A soft-wrapped row is a continuation of the one
     /// above it, which is what makes reflow on resize possible: the rows
@@ -376,10 +376,7 @@ public final class Screen {
         let capture = scrollTop == 0 && scrollBottom == rows - 1 && !altScreenActive
         for _ in 0..<lines {
             if capture {
-                scrollback.append(Array(grid[0..<cols]))
-                if scrollback.count > scrollbackLimit {
-                    scrollback.removeFirst(scrollback.count - scrollbackLimit)
-                }
+                scrollback.append(Array(grid[0..<cols]), limit: scrollbackLimit)
             }
             for row in scrollTop..<scrollBottom {
                 let source = (row + 1) * cols
@@ -946,10 +943,14 @@ public final class Screen {
         if stops.count < c { stops.append(contentsOf: Array(repeating: false, count: c - stops.count)) }
         tabStops = stops
 
-        if scrollBottom >= r {
-            scrollTop = 0
-            scrollBottom = r - 1
-        }
+        // A resize resets the scroll region to the whole screen, as xterm does.
+        // Keeping the old bottom margin when the screen grows leaves the rows
+        // below it outside the region: line feeds then scroll a strip that is
+        // shorter than the screen, and since that is not a whole-screen scroll,
+        // nothing ever reaches the scrollback again. A program that wants a
+        // region sets it again after SIGWINCH.
+        scrollTop = 0
+        scrollBottom = r - 1
         cursor.row = min(cursor.row, r - 1)
         cursor.col = min(cursor.col, c - 1)
         cursor.pendingWrap = false
@@ -995,10 +996,14 @@ public final class Screen {
         var stops = Array(tabStops.prefix(c))
         if stops.count < c { stops.append(contentsOf: Array(repeating: false, count: c - stops.count)) }
         tabStops = stops
-        if scrollBottom >= r {
-            scrollTop = 0
-            scrollBottom = r - 1
-        }
+        // A resize resets the scroll region to the whole screen, as xterm does.
+        // Keeping the old bottom margin when the screen grows leaves the rows
+        // below it outside the region: line feeds then scroll a strip that is
+        // shorter than the screen, and since that is not a whole-screen scroll,
+        // nothing ever reaches the scrollback again. A program that wants a
+        // region sets it again after SIGWINCH.
+        scrollTop = 0
+        scrollBottom = r - 1
         cursor.row = min(cursor.row, r - 1)
         cursor.col = min(cursor.col, c - 1)
         cursor.pendingWrap = false
@@ -1065,17 +1070,32 @@ public final class Screen {
     /// one set of tests. `scrollOffset` is clamped, so a viewport cannot be
     /// scrolled past the oldest line held.
     ///
-    /// This allocates per call, which is fine for the CoreText renderer of this
-    /// milestone and is one of the things Metal replaces.
+    /// Only the rows on screen are copied: scrolled back by one line into a
+    /// ten-thousand-line history, this is `rows` lines of work, not ten thousand.
     public func displayRows(scrollOffset: Int) -> [[Cell]] {
-        let live = (0..<rows).map { row in
-            Array(grid[(row * cols)..<((row + 1) * cols)])
-        }
-        guard scrollOffset > 0, !scrollback.isEmpty else { return live }
-
-        let combined = scrollback + live
         let first = viewportFirstRow(scrollOffset: scrollOffset)
-        return Array(combined[first..<Swift.min(first + rows, combined.count)])
+        let history = scrollback.count
+        return (first..<(first + rows)).map { absolute in
+            if absolute < history { return scrollback[absolute] }
+            let row = absolute - history
+            return Array(grid[(row * cols)..<((row + 1) * cols)])
+        }
+    }
+
+    /// Where a viewport that was `scrollOffset` lines up into history should be
+    /// once `linesAppended` more lines have entered the scrollback, so it keeps
+    /// showing the same lines.
+    ///
+    /// `scrollOffset` counts up from the live screen, so standing still means
+    /// moving up by exactly the lines appended — whether the history grew, or
+    /// was full and dropped its oldest to make room. The live screen (offset 0)
+    /// stays live: following output is what it is for. Clamped, so a history
+    /// that was cleared or shrunk underneath cannot leave the viewport past it.
+    public static func pinnedScrollOffset(_ scrollOffset: Int,
+                                          linesAppended: Int,
+                                          historyCount: Int) -> Int {
+        guard scrollOffset > 0 else { return 0 }
+        return Swift.min(scrollOffset + Swift.max(0, linesAppended), historyCount)
     }
 
     /// The absolute row of the scrollback-plus-live screen that the viewport's

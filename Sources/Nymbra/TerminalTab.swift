@@ -89,7 +89,7 @@ final class TerminalTab {
         }
         terminal.onUpdate = { [weak self, weak view] in
             guard let view else { return }
-            view.needsDisplay = true
+            view.screenDidUpdate()
             self?.updateTitle()
             self?.noteOutput()
         }
