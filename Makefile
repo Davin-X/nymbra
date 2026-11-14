@@ -3,7 +3,7 @@
 # asking *inside* a recipe can race the build that just finished.
 bin = $(shell swift build -c release --show-bin-path 2>/dev/null)
 
-.PHONY: help build test run app launch install dist pty-test screen-test resize-test window-test tabs-test location-test input-test mouse-test shell-integration-test notify-test lint architecture check clean
+.PHONY: help build test run app launch install dist dmg pty-test screen-test resize-test window-test tabs-test location-test input-test mouse-test shell-integration-test notify-test lint architecture check clean
 
 help:
 	@echo "make build       - release build"
@@ -14,6 +14,7 @@ help:
 	@echo "make launch      - build Nymbra.app and open it from Finder"
 	@echo "make install     - copy Nymbra.app to /Applications (or ~/Applications)"
 	@echo "make dist        - zip Nymbra.app so it can be handed to someone else"
+	@echo "make dmg         - build Nymbra.dmg: the app beside an Applications shortcut"
 	@echo "make pty-test    - headless proof that the PTY runs a login shell"
 	@echo "make screen-test - assertions against real shell output, fed through the parser"
 	@echo "make resize-test - proof that the view and the shell agree on the grid"
@@ -81,6 +82,9 @@ dist: app
 	@cd build && xattr -cr Nymbra.app 2>/dev/null || true
 	@cd build && ditto -c -k --keepParent --noextattr --norsrc Nymbra.app Nymbra.zip
 	@echo "dist: build/Nymbra.zip ($$(du -h build/Nymbra.zip | cut -f1))"
+
+dmg: app
+	@Scripts/make-dmg.sh
 
 pty-test: build
 	"$(bin)/Nymbra" --pty-test

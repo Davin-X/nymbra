@@ -37,6 +37,7 @@ not, that is a bug — please report it.
 | `make launch` | Build the bundle and open it |
 | `make install` | Copy the bundle to `/Applications` (or `~/Applications`) |
 | `make dist` | Zip the bundle as `build/Nymbra.zip` |
+| `make dmg` | Build `build/Nymbra.dmg`: the app beside an Applications shortcut |
 | `make check` | Everything CI runs — lint, build, tests, headless proofs |
 | `make clean` | Remove build output |
 

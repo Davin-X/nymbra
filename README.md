@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Davin-X/nymbra/releases"><img alt="Download" src="https://img.shields.io/badge/Download-.zip-blue?style=flat-square"></a>
+  <a href="https://github.com/Davin-X/nymbra/releases/latest"><img alt="Download" src="https://img.shields.io/badge/Download-.dmg-blue?style=flat-square"></a>
   <a href="https://github.com/Davin-X/nymbra/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Davin-X/nymbra/ci.yml?branch=main&style=flat-square&label=CI"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-green?style=flat-square"></a>
   <img alt="Platform" src="https://img.shields.io/badge/macOS-11%2B-lightgrey?style=flat-square">
@@ -106,9 +106,11 @@ Changes apply to open terminals as you make them. **Reset** shows what will chan
 
 ## Install
 
-1. Download `Nymbra.zip` from [GitHub Releases](https://github.com/Davin-X/nymbra/releases). It runs on Apple Silicon Macs.
-2. Unzip it and drag **Nymbra.app** into **Applications**.
-3. Open it.
+1. Download `Nymbra.dmg` from [GitHub Releases](https://github.com/Davin-X/nymbra/releases/latest). It runs on Apple Silicon Macs.
+2. Open it and drag **Nymbra** onto the **Applications** shortcut.
+3. Eject the disk image and open Nymbra from Applications.
+
+`Nymbra.zip` on the same page has the same app, if you'd rather unzip it. Each file has a `.sha256` beside it to check the download.
 
 ### macOS Gatekeeper (unsigned build)
 
@@ -176,6 +178,10 @@ make launch     # build it and open it
 
 ```bash
 make install    # copy it to /Applications (or ~/Applications)
+```
+
+```bash
+make dmg        # build/Nymbra.dmg, drag-to-install
 ```
 
 ```bash
