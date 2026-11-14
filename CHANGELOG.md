@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-11-14
+
+The first pre-release. **Unsigned**: on first launch, right-click the app and
+choose Open (Gatekeeper does not know an unsigned app). Signing, notarization
+and an updater are M6.
+
+### Added — typing in any language, and frames that do not tear
+
+- **Input methods.** Japanese, Chinese and Korean input, press-and-hold accents
+  and the emoji picker now work: composed text is drawn underlined at the cursor
+  and only sent once committed, and the candidate window opens beside the
+  cursor. Keys that are not text (arrows, Return, Tab, Escape, F-keys) and
+  Control/Option chords still go straight to the key table, so programs get
+  exactly the bytes they did before. `--input-test`.
+- **Synchronized output (DEC mode 2026).** Neovim, Helix and lazygit redraw
+  without tearing: the view holds the last complete frame until the program
+  finishes the next, with a 150 ms safety limit. DECRQM answers whether 2026
+  (and the other tracked modes) is supported.
+
+### Added — knowing where you are
+
+- Tabs are named after the **folder or running program** (`nymbra`, `vim`),
+  and the window title says where: `vim — ~/src/nymbra`. Read from the kernel,
+  so it works with shell integration off; `OSC 7` from the shell wins when it
+  is sent, which is what makes it right over `ssh`. zsh integration now sends it.
+- **New tabs and splits open in the current folder.**
+- A **path bar** under the tabs — `⌂ › ~/src/nymbra` on the left, `● shell
+  running · zsh · ⇧⌘P commands` on the right. Click the path to show it in
+  Finder; click the hint for the command palette. `--location-test`.
+
+### Changed — one window, not three bars
+
+- The title bar, tab strip and path bar are one continuous surface coloured from
+  the theme, under a transparent title bar with **find, more and settings**
+  buttons at its right. Flat tab chips, a centred tab count, and more room
+  around the text.
+- Layer colours follow the system between light and dark.
+- A **"needs attention" inbox**: long commands that finished or failed out of
+  sight are collected (three at most) behind an indicator in the tab strip.
+- An **overlay scrollbar** that appears while you are scrolled back.
+
+### Fixed
+
+- **Scrollback stopped filling once the window grew taller.** A resize kept the
+  old bottom of the scroll region; it now resets to the whole screen, as xterm
+  does.
+- **Reading history while output arrived slid the text under you.** The
+  viewport now stays on the lines being read.
+- **Find scrolled to a match in history and left it off screen.**
+- Scrollback is a ring buffer (no 10,000-line shift per line once full), only
+  visible rows are copied per frame, and PTY output is coalesced into one
+  parse-and-redraw per main-loop turn.
+
+
 ### Fixed — the prompt gallery did nothing, because nothing drew it
 
 - **The Prompt style cards recorded a choice and then threw it away.** The
@@ -833,5 +887,6 @@ First scaffold. Not usable as a daily driver.
 - `--pty-test` headless smoke test, suitable for CI.
 - `Makefile` targets: `build`, `test`, `pty-test`, `check`, `clean`.
 
-[Unreleased]: https://github.com/Davin-X/nymbra/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/Davin-X/nymbra/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Davin-X/nymbra/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/Davin-X/nymbra/releases/tag/v0.0.1
